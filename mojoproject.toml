@@ -1,0 +1,18 @@
+# MongrelDB Mojo client project.
+#
+# A pure-Mojo client for a running `mongreldb-server` daemon. Mojo is a Python
+# superset, so this client uses Python's standard-library urllib (via Mojo's
+# seamless Python interop) for HTTP and json/base64 for encoding. No external
+# packages are required.
+
+[project]
+name = "mongreldb-mojo"
+version = "0.1.0"
+description = "Pure-Mojo client for MongrelDB"
+authors = ["VisorCraft LLC"]
+
+[project.python]
+# No third-party Python dependencies; uses the standard library (urllib/json).
+
+# Source layout: the client package lives under src/mongreldb/. Tests and
+# examples import it via `mojo test -I src` / `mojo run -I src`.

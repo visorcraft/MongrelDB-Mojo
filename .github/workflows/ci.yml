@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & offline tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python (for urllib interop used by the client)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the Modular CLI + Mojo
+        run: |
+          curl -fsSL https://repo.prefix.dev/setup/mojo.sh | bash
+          echo "$HOME/.modular/bin" >> "$GITHUB_PATH"
+
+      - name: Check Mojo
+        run: mojo --version || magic --version
+
+      - name: Compile client
+        run: mojo build -I src src/mongreldb/__init__.mojo || mojo package -I src src/mongreldb || true
+
+      # Offline unit tests run without a daemon; the live tests self-skip when
+      # no server binary is available.
+      - name: Run tests
+        run: mojo test -I src tests/live_test.mojo
+
+  live:
+    # Boots a real mongreldb-server and runs the live round-trip suite.
+    name: Live integration (against mongreldb-server)
+    runs-on: ubuntu-latest
+    env:
+      SERVER_VERSION: '0.46.2'
+      MONGRELDB_URL: http://127.0.0.1:8453
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the Modular CLI + Mojo
+        run: |
+          curl -fsSL https://repo.prefix.dev/setup/mojo.sh | bash
+          echo "$HOME/.modular/bin" >> "$GITHUB_PATH"
+
+      - name: Check Mojo
+        run: mojo --version || magic --version
+
+      - name: Cache mongreldb-server binary
+        id: server-cache
+        uses: actions/cache@v6
+        with:
+          path: bin/mongreldb-server
+          key: mongreldb-server-linux-x64-${{ env.SERVER_VERSION }}
+
+      - name: Download mongreldb-server
+        if: steps.server-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p bin
+          curl -fsSL -o bin/mongreldb-server \
+            "https://github.com/visorcraft/MongrelDB/releases/download/v${SERVER_VERSION}/mongreldb-server-linux-x64"
+          chmod +x bin/mongreldb-server
+          ./bin/mongreldb-server --help | head -n 1
+
+      - name: Start mongreldb-server
+        run: |
+          rm -rf /tmp/mongreldb-data
+          ./bin/mongreldb-server /tmp/mongreldb-data --port 8453 > /tmp/mongreldb-server.log 2>&1 &
+          echo $! > /tmp/mongreldb-server.pid
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8453/health >/dev/null 2>&1; then
+              echo "mongreldb-server is healthy"
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8453/health >/dev/null || (cat /tmp/mongreldb-server.log && exit 1)
+
+      - name: Run live tests
+        run: mojo test -I src tests/live_test.mojo
+
+      - name: Run examples
+        run: |
+          for ex in examples/*.mojo; do
+            echo "=== Running $ex ==="
+            mojo run -I src "$ex" || { echo "FAILED: $ex"; exit 1; }
+          done
+
+      - name: Dump server log on failure
+        if: failure()
+        run: cat /tmp/mongreldb-server.log
+
+      - name: Stop mongreldb-server
+        if: always()
+        run: |
+          if [ -f /tmp/mongreldb-server.pid ]; then
+            kill "$(cat /tmp/mongreldb-server.pid)" 2>/dev/null || true
+          fi

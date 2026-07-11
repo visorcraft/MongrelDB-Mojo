@@ -4,6 +4,8 @@
 
 <h1 align="center">MongrelDB Mojo Client</h1>
 
+History retention: `set_history_retention_epochs`, `history_retention_epochs`, and `earliest_retained_epoch`.
+
 <p align="center">
   <b>Pure Mojo client for MongrelDB - embedded+server database with SQL, vector search, full-text search, and AI-native retrieval.</b>
   <br />

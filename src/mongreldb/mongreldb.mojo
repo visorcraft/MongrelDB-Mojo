@@ -99,6 +99,20 @@ struct MongrelDB:
         except:
             return List[String]()
 
+    fn set_history_retention_epochs(self, epochs: Int) -> PythonObject:
+        payload = Python.dict()
+        payload.__setitem__("history_retention_epochs", epochs)
+        return _decode_json_or(self._json, self._request("PUT", "/history/retention", payload), PythonObject())
+
+    fn history_retention(self) -> PythonObject:
+        return _decode_json_or(self._json, self._get("/history/retention"), PythonObject())
+
+    fn history_retention_epochs(self) -> Int:
+        return Int(self.history_retention().__getitem__("history_retention_epochs"))
+
+    fn earliest_retained_epoch(self) -> Int:
+        return Int(self.history_retention().__getitem__("earliest_retained_epoch"))
+
     fn create_table(
         self,
         name: String,

@@ -9,6 +9,7 @@ from .mongreldb import (
     MAX_RESPONSE_BYTES,
     _url_path_escape,
     _flatten_cells,
+    _create_table_payload,
 )
 from .errors import (
     MongrelDBError,

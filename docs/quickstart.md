@@ -79,8 +79,11 @@ fn main() raises:
 
     let params = Python.dict()
     params.__setitem__("column", 3)
-    params.__setitem__("min", 100)
-    let rows = db.query("orders").where("range", params).limit(100).execute().to_list()
+    params.__setitem__("min", 100.0)
+    params.__setitem__("max", 200.0)
+    params.__setitem__("min_inclusive", True)
+    params.__setitem__("max_inclusive", True)
+    let rows = db.query("orders").where("range_f64", params).limit(100).execute().to_list()
     print("rows: " + String(len(rows)))
 
     print("total rows: " + String(db.count("orders")))
@@ -103,6 +106,7 @@ mojo run -I src demo.mojo
 | `db.query(table).where(...)` | Builds a `/kit/query` body that pushes a condition down to a native index. |
 | `.execute()` | Sends the query and decodes the rows. |
 | `db.count(table)` | GET `/tables/{name}/count`. |
+| `db.set_history_retention_epochs(n)` | PUT `/history/retention`; controls time-travel query depth. |
 
 ## 6. Common pitfalls
 

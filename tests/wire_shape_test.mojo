@@ -1,5 +1,6 @@
 from python import Python
 from mongreldb import _create_table_payload
+from mongreldb.mongreldb import _history_retention_payload
 
 
 def assert_contains(body: String, needle: String):
@@ -65,3 +66,11 @@ def test_create_table_wire_shape():
     assert_contains(body, "\"constraints\"")
     assert_contains(body, "\"checks\"")
     assert_contains(body, "\"IsNotNull\"")
+
+
+def test_history_retention_wire_shape():
+    """The PUT /history/retention body must carry the exact frozen key."""
+    json = Python.import_module("json")
+    body = String(json.dumps(_history_retention_payload(42)))
+    assert_contains(body, "\"history_retention_epochs\"")
+    assert_contains(body, "\"history_retention_epochs\": 42")

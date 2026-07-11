@@ -23,7 +23,7 @@ from mongreldb import (
     _url_path_escape,
 )
 from mongreldb.query_builder import _normalize_condition
-from mongreldb.mongreldb import _flatten_cells
+from mongreldb.mongreldb import _flatten_cells, _decode_json_or
 
 
 # ── Tiny assertion helpers (wrapping Mojo's builtin assert) ────────────────
@@ -164,6 +164,16 @@ def _float_col(col_id: Int, name: String) -> PythonObject:
     c.__setitem__("id", Python.object(col_id))
     c.__setitem__("name", Python.str(name))
     c.__setitem__("ty", "float64")
+    c.__setitem__("primary_key", Python.object(False))
+    c.__setitem__("nullable", Python.object(False))
+    return c
+
+
+def _string_col(col_id: Int, name: String) -> PythonObject:
+    c = Python.dict()
+    c.__setitem__("id", Python.object(col_id))
+    c.__setitem__("name", Python.str(name))
+    c.__setitem__("ty", "varchar")
     c.__setitem__("primary_key", Python.object(False))
     c.__setitem__("nullable", Python.object(False))
     return c
@@ -368,6 +378,92 @@ def test_error_404():
     except NotFoundError:
         raised = True
     assert_true(raised)
+
+
+def test_history_retention():
+    if not _require_daemon():
+        return
+    original = db.history_retention_epochs()
+    try:
+        result = db.set_history_retention_epochs(1000)
+        assert_equal(Int(result.__getitem__("history_retention_epochs")), 1000)
+        assert_true(Int(result.__getitem__("earliest_retained_epoch")) <= 1000)
+        assert_equal(db.history_retention_epochs(), 1000)
+        assert_true(db.earliest_retained_epoch() <= 1000)
+    finally:
+        db.set_history_retention_epochs(original)
+
+
+def test_history_retention_read_as_of_epoch():
+    if not _require_daemon():
+        return
+    original = db.history_retention_epochs()
+    try:
+        db.set_history_retention_epochs(1000)
+
+        name = _unique_table("mojo_retention")
+        _fresh_table(name, _int_col(1, "id", True), _string_col(2, "label"))
+
+        # Insert the initial row and capture the commit epoch.
+        # The public CRUD helpers discard the top-level commit epoch, so we use
+        # the raw /kit/txn endpoint here to obtain the epoch for an AS OF EPOCH
+        # read.
+        json = Python.import_module("json")
+        payload = Python.dict()
+        ops = Python.list()
+        op = Python.dict()
+        put = Python.dict()
+        put.__setitem__("table", name)
+        put_cells = Python.list()
+        put_cells.append(1)
+        put_cells.append(1)
+        put_cells.append(2)
+        put_cells.append("first")
+        put.__setitem__("cells", put_cells)
+        op.__setitem__("put", put)
+        ops.append(op)
+        payload.__setitem__("ops", ops)
+        txn_body = Bytes(json.dumps(payload).encode("utf-8"))
+        txn_resp = _decode_json_or(json, db._post("/kit/txn", txn_body), Python.dict())
+        write_epoch = Int(txn_resp.__getitem__("epoch"))
+
+        # Update the row so a later epoch exists.
+        payload2 = Python.dict()
+        ops2 = Python.list()
+        op2 = Python.dict()
+        upsert = Python.dict()
+        upsert.__setitem__("table", name)
+        ups_cells = Python.list()
+        ups_cells.append(1)
+        ups_cells.append(1)
+        ups_cells.append(2)
+        ups_cells.append("second")
+        upsert.__setitem__("cells", ups_cells)
+        ups_update = Python.list()
+        ups_update.append(2)
+        ups_update.append("second")
+        upsert.__setitem__("update_cells", ups_update)
+        op2.__setitem__("upsert", upsert)
+        ops2.append(op2)
+        payload2.__setitem__("ops", ops2)
+        txn_body2 = Bytes(json.dumps(payload2).encode("utf-8"))
+        txn_resp2 = _decode_json_or(json, db._post("/kit/txn", txn_body2), Python.dict())
+        update_epoch = Int(txn_resp2.__getitem__("epoch"))
+        assert_true(update_epoch > write_epoch)
+
+        # Current value is "second".
+        current = db.sql("SELECT label FROM " + name + " WHERE id = 1").to_list()
+        assert_equal(len(current), 1)
+        assert_equal(String(current[0].__getitem__("label")), "second")
+
+        # Historical read at the original write epoch should still see "first".
+        historical = db.sql(
+            "SELECT label FROM " + name + " AS OF EPOCH " + String(write_epoch) + " WHERE id = 1"
+        ).to_list()
+        assert_equal(len(historical), 1)
+        assert_equal(String(historical[0].__getitem__("label")), "first")
+    finally:
+        db.set_history_retention_epochs(original)
 
 
 # ── Offline tests (always run, no daemon) ───────────────────────────────────

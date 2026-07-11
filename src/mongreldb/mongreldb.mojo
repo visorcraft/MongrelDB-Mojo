@@ -100,18 +100,34 @@ struct MongrelDB:
             return List[String]()
 
     fn set_history_retention_epochs(self, epochs: Int) -> PythonObject:
-        payload = Python.dict()
-        payload.__setitem__("history_retention_epochs", epochs)
-        return _decode_json_or(self._json, self._request("PUT", "/history/retention", payload), PythonObject())
+        """Set the durable MVCC history window and return the full response."""
+        if epochs < 0:
+            raise QueryError("mongreldb: history retention epochs must be non-negative")
+        return _decode_json_or(
+            self._json,
+            self._request("PUT", "/history/retention", _history_retention_payload(epochs)),
+            PythonObject(),
+        )
 
-    fn history_retention(self) -> PythonObject:
+    fn _history_retention(self) -> PythonObject:
+        """Internal: raw GET /history/retention response."""
         return _decode_json_or(self._json, self._get("/history/retention"), PythonObject())
 
     fn history_retention_epochs(self) -> Int:
-        return Int(self.history_retention().__getitem__("history_retention_epochs"))
+        """Return the current history retention window in epochs."""
+        data = self._history_retention()
+        try:
+            return Int(data.__getitem__("history_retention_epochs"))
+        except:
+            raise QueryError("mongreldb: malformed history retention response")
 
     fn earliest_retained_epoch(self) -> Int:
-        return Int(self.history_retention().__getitem__("earliest_retained_epoch"))
+        """Return the oldest epoch still readable for time-travel queries."""
+        data = self._history_retention()
+        try:
+            return Int(data.__getitem__("earliest_retained_epoch"))
+        except:
+            raise QueryError("mongreldb: malformed history retention response")
 
     fn create_table(
         self,
@@ -369,6 +385,13 @@ def _create_table_payload(
     payload.__setitem__("columns", columns)
     if constraints is not None:
         payload.__setitem__("constraints", constraints)
+    return payload
+
+
+def _history_retention_payload(epochs: Int) -> PythonObject:
+    """Build the object posted to PUT /history/retention."""
+    payload = Python.dict()
+    payload.__setitem__("history_retention_epochs", Python.object(epochs))
     return payload
 
 

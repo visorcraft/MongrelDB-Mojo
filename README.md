@@ -4,8 +4,6 @@
 
 <h1 align="center">MongrelDB Mojo Client</h1>
 
-History retention: `set_history_retention_epochs`, `history_retention_epochs`, and `earliest_retained_epoch`.
-
 <p align="center">
   <b>Pure Mojo client for MongrelDB - embedded+server database with SQL, vector search, full-text search, and AI-native retrieval.</b>
   <br />
@@ -104,6 +102,9 @@ fn main() raises:
     let params = Python.dict()
     params.__setitem__("column", 3)
     params.__setitem__("min", 100.0)
+    params.__setitem__("max", 200.0)
+    params.__setitem__("min_inclusive", True)
+    params.__setitem__("max_inclusive", True)
     let rows = db.query("orders").where("range_f64", params).limit(100).execute()
     print(db.count("orders"))   # 2
 
@@ -144,6 +145,28 @@ db.sql("INSERT INTO orders (id, customer, amount) VALUES (99, 'Zoe', 999.0)")
 db.sql("CREATE TABLE archive AS SELECT * FROM orders WHERE amount > 500")
 ```
 
+## History retention
+
+Control how far back time-travel queries can read. The window is measured in
+epochs (monotonically increasing commit numbers).
+
+```mojo
+# Keep at least 1000 epochs of history readable.
+let result = db.set_history_retention_epochs(1000)
+print(result.__getitem__("history_retention_epochs"))  # 1000
+print(result.__getitem__("earliest_retained_epoch"))   # oldest epoch still available
+
+print(db.history_retention_epochs())       # 1000
+print(db.earliest_retained_epoch())        # oldest readable epoch
+
+# Read a table as it existed at a specific epoch.
+let rows = db.sql("SELECT label FROM orders AS OF EPOCH 42 WHERE id = 1")
+```
+
+Raising retention prevents history from being garbage collected, but it cannot
+restore epochs that have already been pruned. These endpoints require admin
+privileges when the daemon runs with auth enabled.
+
 ## Error handling
 
 Every non-2xx response is mapped to a typed error. Catch the specific class for
@@ -181,6 +204,9 @@ except QueryError:
 | `sql_arrow(sql) -> Bytes` | Execute SQL requesting raw Arrow IPC |
 | `schema() -> dict` | Full schema catalog |
 | `schema_for(table) -> dict` | Single-table descriptor |
+| `set_history_retention_epochs(epochs) -> dict` | Set the history retention window |
+| `history_retention_epochs() -> Int` | Get the current retention window |
+| `earliest_retained_epoch() -> Int` | Get the oldest readable epoch |
 | `compact() -> dict` | Compact all tables |
 | `compact_table(table) -> dict` | Compact one table |
 | `begin() -> Transaction` | Start a batch |

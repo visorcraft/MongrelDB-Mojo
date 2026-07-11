@@ -33,7 +33,7 @@
 - **Fluent query builder** that pushes conditions down to the engine's specialized indexes for sub-millisecond lookups: bitmap equality/IN, learned-range, null checks, FM-index full-text search, HNSW vector similarity (`ann`), and sparse vector match. Friendly aliases (`column` -> `column_id`, `min`/`max` -> `lo`/`hi`) are translated to the server's on-wire keys.
 - **Idempotent batch transactions** - operations staged locally and committed atomically, with the engine enforcing unique, foreign-key, and check constraints at commit time.
 - **Full SQL access** through the DataFusion-backed `/sql` endpoint. JSON mode (`sql`) decodes row arrays; `sql_arrow` requests raw Arrow IPC bytes (`format: "arrow"`).
-- **Schema management**: typed table creation, full schema catalog, and per-table descriptors.
+- **Schema management**: typed table creation, full schema catalog, and per-table descriptors. Column dictionaries preserve scalar `default_value` and dynamic `default_expr` (`"now"` or `"uuid"`).
 - **User/role/credentials management** via SQL: Argon2id-hashed catalog users, roles, and `GRANT`/`REVOKE` table-level permissions, all executed through `sql`.
 - **Maintenance**: compaction (all tables or per-table).
 - **Auth**: Bearer token (`--auth-token` mode) and HTTP Basic (`--auth-users` mode), with the bearer token taking precedence. Credentials are CRLF-validated to prevent header injection.

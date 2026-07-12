@@ -72,17 +72,21 @@ jobs:
         run: mojo build -I src src/mongreldb/__init__.mojo || mojo package -I src src/mongreldb || true
 
       # Offline unit tests run without a daemon; the live tests self-skip when
-      # no server binary is available.
+      # no server binary is available. The wire-shape suite is pure-offline
+      # (including a mock HTTP server for the transport tests) so it runs first
+      # as a fast gate.
       - name: Run tests
         if: steps.check.outputs.available == 'true'
-        run: mojo test -I src tests/live_test.mojo
+        run: |
+          mojo test -I src tests/wire_shape_test.mojo
+          mojo test -I src tests/live_test.mojo
 
   live:
     # Boots a real mongreldb-server and runs the live round-trip suite.
     name: Live integration (against mongreldb-server)
     runs-on: ubuntu-latest
     env:
-      SERVER_VERSION: '0.48.0'
+      SERVER_VERSION: '0.49.0'
       MONGRELDB_URL: http://127.0.0.1:8453
     steps:
       - name: Checkout

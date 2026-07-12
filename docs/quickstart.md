@@ -24,7 +24,7 @@ mojo --version
 ```sh
 mkdir -p bin
 curl -fsSL -o bin/mongreldb-server \
-  https://github.com/visorcraft/MongrelDB/releases/download/v0.48.0/mongreldb-server-linux-x64
+  https://github.com/visorcraft/MongrelDB/releases/download/v0.49.0/mongreldb-server-linux-x64
 chmod +x bin/mongreldb-server
 ```
 
@@ -108,7 +108,57 @@ mojo run -I src demo.mojo
 | `db.count(table)` | GET `/tables/{name}/count`. |
 | `db.set_history_retention_epochs(n)` | PUT `/history/retention`; controls time-travel query depth. |
 
-## 6. Common pitfalls
+## 6. Static column defaults
+
+A column dict may carry a `default_value` (a static literal applied when a row
+omits the cell) or a `default_expr` (a dynamic engine-computed default such as
+`now` or `uuid`). `default_expr` wins over `default_value` when both are set.
+The six recognized shapes - each preserving its JSON type on the wire - are:
+
+```mojo
+from python import Python
+
+# 1. String default.
+c1 = Python.dict()
+c1.__setitem__("id", 10); c1.__setitem__("name", "status")
+c1.__setitem__("ty", "varchar"); c1.__setitem__("default_value", "draft")
+
+# 2. Integer default.
+c2 = Python.dict()
+c2.__setitem__("id", 11); c2.__setitem__("name", "retries")
+c2.__setitem__("ty", "int64"); c2.__setitem__("default_value", 3)
+
+# 3. Boolean default.
+c3 = Python.dict()
+c3.__setitem__("id", 12); c3.__setitem__("name", "enabled")
+c3.__setitem__("ty", "bool"); c3.__setitem__("default_value", True)
+
+# 4. Explicit null default (distinct from omitting the key).
+c4 = Python.dict()
+c4.__setitem__("id", 13); c4.__setitem__("name", "note")
+c4.__setitem__("ty", "varchar"); c4.__setitem__("default_value", None)
+
+# 5. Literal string "now" - stored as a plain string default, not a dynamic
+#    expression, because it is passed via default_value rather than default_expr.
+c5 = Python.dict()
+c5.__setitem__("id", 14); c5.__setitem__("name", "tag")
+c5.__setitem__("ty", "varchar"); c5.__setitem__("default_value", "now")
+
+# 6. Dynamic default_expr - the engine evaluates "now" on each insert.
+c6 = Python.dict()
+c6.__setitem__("id", 15); c6.__setitem__("name", "created_at")
+c6.__setitem__("ty", "timestamp_nanos"); c6.__setitem__("default_expr", "now")
+
+columns = Python.list()
+for c in [c1, c2, c3, c4, c5, c6]:
+    columns.append(c)
+db.create_table("defaults_demo", columns)
+```
+
+Omit both keys for a column with no default (the server requires a cell on every
+insert in that case).
+
+## 7. Common pitfalls
 
 **Using the column name instead of the column id.** Every on-wire API uses the
 numeric `id` from `create_table`. The query builder's `column` alias maps to the

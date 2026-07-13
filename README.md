@@ -218,6 +218,7 @@ except QueryError:
 | `where(cond_type, params) -> Self` | Add a native condition (AND-ed) |
 | `projection(column_ids) -> Self` | Set column projection |
 | `limit(n) -> Self` | Set row limit |
+| `offset(n) -> Self` | Skip matching rows before the limit |
 | `build() -> dict` | Build the request payload |
 | `execute() -> list` | Run the query |
 | `truncated() -> Bool` | Whether the last `execute` result hit the limit |

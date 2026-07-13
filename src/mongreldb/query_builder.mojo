@@ -30,6 +30,8 @@ struct QueryBuilder:
     var _conditions: List[PythonObject]
     var _projection: PythonObject
     var _limit: Int
+    var _offset: Int
+    var _has_offset: Bool
     var _last_truncated: Bool
 
     fn __init__(client: MongrelDB, table: String):
@@ -38,6 +40,8 @@ struct QueryBuilder:
         self._conditions = List[PythonObject]()
         self._projection = PythonObject()  # None
         self._limit = -1
+        self._offset = -1
+        self._has_offset = False
         self._last_truncated = False
 
     fn where(self, cond_type: String, params: PythonObject) -> Self:
@@ -62,6 +66,12 @@ struct QueryBuilder:
         self._limit = n
         return self
 
+    fn offset(self, n: Int) -> Self:
+        """Skip matching rows before applying the limit."""
+        self._offset = n
+        self._has_offset = True
+        return self
+
     fn build(self) -> PythonObject:
         """Build the request payload that will be sent to /kit/query."""
         payload = Python.dict()
@@ -75,6 +85,8 @@ struct QueryBuilder:
             payload.__setitem__("projection", self._projection)
         if self._limit >= 0:
             payload.__setitem__("limit", Python.object(self._limit))
+        if self._has_offset:
+            payload.__setitem__("offset", Python.object(self._offset))
         return payload
 
     fn execute(self) -> PythonObject:

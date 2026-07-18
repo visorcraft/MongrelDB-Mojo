@@ -397,12 +397,17 @@ def _history_retention_payload(epochs: Int) -> PythonObject:
 
 def _flatten_cells(json_module: PythonObject, cells: PythonObject) -> PythonObject:
     """Flatten a column-id-to-value dict to the server's [col_id, value, ...]
-    list. Pair order is not significant."""
+    list in ascending column-id order. Stable ordering is required for
+    idempotency keys: the server hashes the request payload, and unordered
+    dict iteration would make two commits of the same cells look like a reuse
+    mismatch."""
     out = json_module.list()
-    items = cells.items()
-    for kv in items:
-        out.append(kv.__getitem__(0))
-        out.append(kv.__getitem__(1))
+    # Sort by column id for stable JSON payload hashing.
+    keys = list(cells.keys())
+    keys.sort(key=lambda k: int(k))
+    for k in keys:
+        out.append(k)
+        out.append(cells.__getitem__(k))
     return out
 
 

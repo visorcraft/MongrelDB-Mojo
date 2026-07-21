@@ -134,9 +134,10 @@ struct MongrelDB:
         name: String,
         columns: PythonObject,
         constraints: PythonObject = PythonObject(),
+        indexes: PythonObject = PythonObject(),
     ) -> Int:
         """Create a table with typed columns; return the assigned table id."""
-        payload = _create_table_payload(name, columns, constraints)
+        payload = _create_table_payload(name, columns, constraints, indexes)
         body = self._post("/kit/create_table", payload)
         data = _decode_json_or(self._json, body, PythonObject())
         try:
@@ -378,6 +379,7 @@ def _create_table_payload(
     name: String,
     columns: PythonObject,
     constraints: PythonObject = PythonObject(),
+    indexes: PythonObject = PythonObject(),
 ) -> PythonObject:
     """Build the object posted to /kit/create_table."""
     payload = Python.dict()
@@ -385,6 +387,8 @@ def _create_table_payload(
     payload.__setitem__("columns", columns)
     if constraints is not None:
         payload.__setitem__("constraints", constraints)
+    if indexes is not None:
+        payload.__setitem__("indexes", indexes)
     return payload
 
 

@@ -192,7 +192,7 @@ except QueryError:
 | `MongrelDB(url, token, username, password)` | Construct a client (`url` defaults to `http://127.0.0.1:8453`) |
 | `health() -> Bool` | Check daemon health |
 | `table_names() -> List[String]` | List table names |
-| `create_table(name, columns) -> Int` | Create a table; returns the table id |
+| `create_table(name, columns, constraints, indexes) -> Int` | Create a table with optional constraints and all index definitions |
 | `drop_table(name) -> None` | Drop a table |
 | `count(table) -> Int` | Row count |
 | `put(table, cells, idempotency_key) -> dict` | Insert a row |

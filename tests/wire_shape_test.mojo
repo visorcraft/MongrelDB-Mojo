@@ -65,8 +65,27 @@ def test_create_table_wire_shape():
     checks.append(check)
     constraints.__setitem__("checks", checks)
 
+    diskann = Python.dict()
+    diskann.__setitem__("r", 64)
+    diskann.__setitem__("l", 128)
+    diskann.__setitem__("beam_width", 8)
+    diskann.__setitem__("alpha", 120)
+    ann = Python.dict()
+    ann.__setitem__("algorithm", "diskann")
+    ann.__setitem__("quantization", "dense")
+    ann.__setitem__("diskann", diskann)
+    options = Python.dict()
+    options.__setitem__("ann", ann)
+    index = Python.dict()
+    index.__setitem__("name", "ann")
+    index.__setitem__("column_id", 2)
+    index.__setitem__("kind", "ann")
+    index.__setitem__("options", options)
+    indexes = Python.list()
+    indexes.append(index)
+
     json = Python.import_module("json")
-    body = String(json.dumps(_create_table_payload("events", columns, constraints)))
+    body = String(json.dumps(_create_table_payload("events", columns, constraints, indexes)))
     assert_contains(body, "\"enum_variants\"")
     assert_contains(body, "\"default_value\": 3")
     assert_contains(body, "\"default_expr\": \"now\"")
@@ -77,6 +96,9 @@ def test_create_table_wire_shape():
     assert_contains(body, "\"constraints\"")
     assert_contains(body, "\"checks\"")
     assert_contains(body, "\"IsNotNull\"")
+    assert_contains(body, "\"algorithm\": \"diskann\"")
+    assert_contains(body, "\"quantization\": \"dense\"")
+    assert_contains(body, "\"beam_width\": 8")
 
 
 def test_history_retention_wire_shape():

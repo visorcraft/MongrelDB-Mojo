@@ -7,7 +7,7 @@
 
 [project]
 name = "mongreldb-mojo"
-version = "0.62.0"
+version = "0.63.0"
 description = "Pure-Mojo client for MongrelDB"
 authors = ["VisorCraft LLC"]
 

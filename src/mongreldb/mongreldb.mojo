@@ -35,6 +35,47 @@ const DEFAULT_BASE_URL = "http://127.0.0.1:8453"
 const MAX_RESPONSE_BYTES = 268435456
 
 
+
+fn parse_commit_hlc(raw: PythonObject) raises -> PythonObject:
+    """Structural last_commit_hlc dict, or empty dict when physical_micros missing."""
+    if not raw:
+        return Python.dict()
+    try:
+        phys = raw["physical_micros"]
+    except Exception:
+        return Python.dict()
+    if phys is None:
+        return Python.dict()
+    out = Python.dict()
+    out["physical_micros"] = phys
+    try:
+        out["logical"] = raw["logical"]
+    except Exception:
+        out["logical"] = 0
+    try:
+        out["node_tiebreaker"] = raw["node_tiebreaker"]
+    except Exception:
+        out["node_tiebreaker"] = 0
+    return out
+
+
+fn commit_hlc_from_status(status: PythonObject) raises -> PythonObject:
+    """Prefer durable → outcome → top-level last_commit_hlc."""
+    for key in ("durable", "outcome"):
+        try:
+            nest = status[key]
+            hlc = parse_commit_hlc(nest["last_commit_hlc"])
+            if hlc:
+                return hlc
+        except Exception:
+            pass
+    try:
+        return parse_commit_hlc(status["last_commit_hlc"])
+    except Exception:
+        return Python.dict()
+
+
+
 struct MongrelDB:
     """The MongrelDB HTTP client.
 

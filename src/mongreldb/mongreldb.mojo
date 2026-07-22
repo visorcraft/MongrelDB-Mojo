@@ -221,6 +221,44 @@ struct MongrelDB:
 
     # ── SQL ────────────────────────────────────────────────────────────────
 
+    fn retrieve_text(
+        self,
+        table: String,
+        embedding_column: Int,
+        text: String,
+        k: Int = 0,
+    ) -> PythonObject:
+        """Text → embed → ANN retrieve (POST /kit/retrieve_text, 0.64+)."""
+        if len(table) == 0:
+            raise QueryError("table is required")
+        if len(text) == 0:
+            raise QueryError("text is required")
+        var payload = Python.dict()
+        payload["table"] = table
+        payload["embedding_column"] = embedding_column
+        payload["text"] = text
+        if k > 0:
+            payload["k"] = k
+        var body = self._post("/kit/retrieve_text", payload)
+        return _decode_json_or(self._json, body, Python.dict())
+
+    fn query_status(self, query_id: String) -> PythonObject:
+        """Retained SQL status for durable recovery (GET /queries/{query_id})."""
+        if len(query_id) == 0:
+            raise QueryError("query_id is required")
+        var body = self._get("/queries/" + _url_path_escape(query_id))
+        return _decode_json_or(self._json, body, Python.dict())
+
+    fn cancel_query(self, query_id: String) -> PythonObject:
+        """Request cancellation of a running SQL query."""
+        if len(query_id) == 0:
+            raise QueryError("query_id is required")
+        var body = self._post(
+            "/queries/" + _url_path_escape(query_id) + "/cancel",
+            Python.dict(),
+        )
+        return _decode_json_or(self._json, body, Python.dict())
+
     fn sql(self, sql: String) -> PythonObject:
         """Execute a SQL statement via /sql requesting JSON output. Returns a
         Python list of row dicts. Empty list for DDL/DML or Arrow responses."""

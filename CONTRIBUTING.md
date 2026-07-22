@@ -23,14 +23,14 @@ workflow on GitHub.
 ## Before you push: preflight
 
 ```sh
-mojo test -I src tests/live_test.mojo
+mojo run -I src tests/live_test.mojo
 ```
 
 All steps must pass. To run the live integration suite (requires a running
 `mongreldb-server`):
 
 ```sh
-MONGRELDB_URL=http://127.0.0.1:8453 mojo test -I src tests/live_test.mojo
+MONGRELDB_URL=http://127.0.0.1:8453 mojo run -I src tests/live_test.mojo
 ```
 
 Live tests self-skip when no server is reachable.

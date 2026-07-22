@@ -69,7 +69,7 @@ jobs:
 
       - name: Compile client
         if: steps.check.outputs.available == 'true'
-        run: mojo build -I src src/mongreldb/__init__.mojo || mojo package -I src src/mongreldb || true
+        run: mojo package -I src src/mongreldb
 
       # Offline unit tests run without a daemon; the live tests self-skip when
       # no server binary is available. The wire-shape suite is pure-offline
@@ -78,8 +78,8 @@ jobs:
       - name: Run tests
         if: steps.check.outputs.available == 'true'
         run: |
-          mojo test -I src tests/wire_shape_test.mojo
-          mojo test -I src tests/live_test.mojo
+          mojo run -I src tests/wire_shape_test.mojo
+          mojo run -I src tests/live_test.mojo
 
   live:
     # Boots a real mongreldb-server and runs the live round-trip suite.
@@ -167,7 +167,7 @@ jobs:
 
       - name: Run live tests
         if: steps.check.outputs.available == 'true'
-        run: mojo test -I src tests/live_test.mojo
+        run: mojo run -I src tests/live_test.mojo
 
       - name: Run examples
         if: steps.check.outputs.available == 'true'

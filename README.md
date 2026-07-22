@@ -37,7 +37,7 @@
 - **User/role/credentials management** via SQL: Argon2id-hashed catalog users, roles, and `GRANT`/`REVOKE` table-level permissions, all executed through `sql`.
 - **Maintenance**: compaction (all tables or per-table).
 - **Auth**: Bearer token (`--auth-token` mode) and HTTP Basic (`--auth-users` mode), with the bearer token taking precedence. Credentials are CRLF-validated to prevent header injection.
-- **Typed error hierarchy**: `MongrelDBError` (base), `AuthError` (401/403), `NotFoundError` (404), `ConflictError` (409, with code + op index), and `QueryError` (everything else, including network failures).
+- **Typed error categories**: `MongrelDBError` (base), `AuthError` (401/403), `NotFoundError` (404), `ConflictError` (409, with code + op index), and `QueryError` (everything else, including network failures) - raised as `Error` values whose message carries the category prefix.
 - **Response size limit** (256 MB) to guard client memory against a malicious or buggy server.
 
 ## How it works
@@ -185,18 +185,21 @@ privileges when the daemon runs with auth enabled.
 
 ## Error handling
 
-Every non-2xx response is mapped to a typed error. Catch the specific class for
-the category, or `MongrelDBError` for any client failure.
+Every non-2xx response is mapped to a typed error category. Mojo raises only
+the built-in `Error` type, so the category, HTTP status, structured code, and
+op index are embedded in the error message - match on the category prefix:
 
 ```mojo
 try:
     db.put("orders", cells(1, 1))
-except ConflictError:
-    print("constraint violated")
-except NotFoundError:
-    print("not found")
-except QueryError:
-    print("query/server error")
+except e:
+    var msg = String(e)
+    if msg.contains("ConflictError"):
+        print("constraint violated")
+    elif msg.contains("NotFoundError"):
+        print("not found")
+    else:
+        print("query/server error: " + msg)
 ```
 
 ## API reference
@@ -253,9 +256,9 @@ except QueryError:
 
 ### Errors
 
-| Class | HTTP status | Notes |
-|-------|-------------|-------|
-| `MongrelDBError` | - | Base class for all client errors |
+| Category | HTTP status | Notes |
+|----------|-------------|-------|
+| `MongrelDBError` | - | Base category for all client errors |
 | `AuthError` | 401, 403 | Bad or missing credentials |
 | `NotFoundError` | 404 | Missing table, schema, or resource |
 | `ConflictError` | 409 | Constraint violation; carries `code` and `op_index` |
@@ -272,7 +275,7 @@ The test suite is split into two layers:
   tests skip cleanly when no binary is available.
 
 ```sh
-mojo test -I src tests/live_test.mojo   # runs the whole suite
+mojo run -I src tests/live_test.mojo   # runs the whole suite
 ```
 
 Fetch a prebuilt server binary from the [MongrelDB releases](https://github.com/visorcraft/MongrelDB/releases):
@@ -294,7 +297,7 @@ Contributions are welcome. Please:
 
 1. Open an issue first for non-trivial changes.
 2. Add focused tests near your change - the suite must stay green.
-3. Run `mojo test -I src tests/live_test.mojo` before submitting.
+3. Run `mojo run -I src tests/live_test.mojo` before submitting.
 4. Keep the client dependency-free (Python standard library only).
 
 ## License

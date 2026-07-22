@@ -8,93 +8,94 @@
 # A Transaction is single-use: after commit() or rollback() it must not be
 # reused.
 
-from python import Python
+from python import Python, PythonObject
+from collections import List, Optional
 from .mongreldb import MongrelDB, _flatten_cells
 from .errors import QueryError
 
 
-struct Transaction:
+struct Transaction(Copyable, Movable):
     """Stages operations locally and commits them atomically.
 
-    Normally created via ``MongrelDB.begin()``.
+    Normally created via ``MongrelDB.begin()``. Staging methods mutate the
+    transaction in place and also return it, so both statement-style
+    (``txn.put(...)``) and bound-style use work.
     """
 
     var _client: MongrelDB
     var _ops: List[PythonObject]
     var _committed: Bool
 
-    fn __init__(client: MongrelDB):
-        self._client = client
+    fn __init__(out self, client: MongrelDB):
+        self._client = client.copy()
         self._ops = List[PythonObject]()
         self._committed = False
 
-    fn _ensure_open(self):
+    fn _ensure_open(self) raises:
         if self._committed:
             raise Error("mongreldb: transaction already committed")
 
-    fn put(self, table: String, cells: PythonObject, returning: Bool = False) -> Self:
+    fn put(mut self, table: String, cells: PythonObject, returning: Bool = False) raises -> Self:
         """Stage an insert."""
         self._ensure_open()
-        inner = Python.dict()
-        inner.__setitem__("table", Python.str(table))
-        inner.__setitem__("cells", _flatten_cells(Python.import_module("json"), cells))
-        inner.__setitem__("returning", Python.object(returning))
-        op = Python.dict()
-        op.__setitem__("put", inner)
+        var inner = Python.dict()
+        inner["table"] = table
+        inner["cells"] = _flatten_cells(Python.import_module("json"), cells)
+        inner["returning"] = returning
+        var op = Python.dict()
+        op["put"] = inner
         self._ops.append(op)
-        return self
+        return self.copy()
 
     fn upsert(
-        self,
+        mut self,
         table: String,
         cells: PythonObject,
-        update_cells: PythonObject = PythonObject(),
+        update_cells: Optional[PythonObject] = None,
         returning: Bool = False,
-    ) -> Self:
+    ) raises -> Self:
         """Stage an insert-or-update."""
         self._ensure_open()
-        json_module = Python.import_module("json")
-        inner = Python.dict()
-        inner.__setitem__("table", Python.str(table))
-        inner.__setitem__("cells", _flatten_cells(json_module, cells))
-        inner.__setitem__("returning", Python.object(returning))
-        try:
-            _ = update_cells.to_list()
-            inner.__setitem__("update_cells", _flatten_cells(json_module, update_cells))
-        except:
-            pass
-        op = Python.dict()
-        op.__setitem__("upsert", inner)
+        var json_module = Python.import_module("json")
+        var inner = Python.dict()
+        inner["table"] = table
+        inner["cells"] = _flatten_cells(json_module, cells)
+        inner["returning"] = returning
+        # update_cells non-empty -> add update_cells
+        if update_cells and update_cells.value():
+            inner["update_cells"] = _flatten_cells(json_module, update_cells.value())
+        var op = Python.dict()
+        op["upsert"] = inner
         self._ops.append(op)
-        return self
+        return self.copy()
 
-    fn delete(self, table: String, row_id: Int) -> Self:
+    fn delete(mut self, table: String, row_id: Int) raises -> Self:
         """Stage a delete by the internal row id."""
         self._ensure_open()
-        inner = Python.dict()
-        inner.__setitem__("table", Python.str(table))
-        inner.__setitem__("row_id", Python.object(row_id))
-        op = Python.dict()
-        op.__setitem__("delete", inner)
+        var inner = Python.dict()
+        inner["table"] = table
+        inner["row_id"] = row_id
+        var op = Python.dict()
+        op["delete"] = inner
         self._ops.append(op)
-        return self
+        return self.copy()
 
-    fn delete_by_pk(self, table: String, pk: PythonObject) -> Self:
+    fn delete_by_pk(mut self, table: String, pk: PythonObject) raises -> Self:
         """Stage a delete by primary-key value."""
         self._ensure_open()
-        inner = Python.dict()
-        inner.__setitem__("table", Python.str(table))
-        inner.__setitem__("pk", pk)
-        op = Python.dict()
-        op.__setitem__("delete_by_pk", inner)
+        var inner = Python.dict()
+        inner["table"] = table
+        inner["pk"] = pk
+        var op = Python.dict()
+        op["delete_by_pk"] = inner
         self._ops.append(op)
-        return self
+        return self.copy()
 
     fn count(self) -> Int:
         """The number of staged operations."""
         return len(self._ops)
 
-    fn commit(self, idempotency_key: String = "") -> List[PythonObject]:
+    fn commit(mut self, idempotency_key: String = "") raises -> List[PythonObject]:
         """Commit all staged operations atomically."""
         if self._committed:
             raise Error("mongreldb: transaction already committed")
@@ -103,7 +104,7 @@ struct Transaction:
             return List[PythonObject]()
         return self._client._commit_txn(self._ops, idempotency_key)
 
-    fn rollback(self) -> None:
+    fn rollback(mut self) raises -> None:
         """Discard all staged operations (local only; nothing sent)."""
         if self._committed:
             raise Error("mongreldb: transaction already committed")

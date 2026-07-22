@@ -11,18 +11,22 @@
 #
 # The server's canonical keys are accepted directly too.
 
-from python import Python
+from python import Python, PythonObject
+from collections import List
 from .mongreldb import MongrelDB, _url_path_escape  # noqa: F401 (re-export helper)
 from .errors import QueryError
 
 
-struct QueryBuilder:
+struct QueryBuilder(Copyable, Movable):
     """A fluent builder for /kit/query requests.
 
     Normally created via ``MongrelDB.query(table)``. Use ``where`` to add native
     conditions (AND-ed), ``projection``/``limit`` to shape the result, and
     ``execute`` to send and decode. Read ``truncated`` after ``execute`` to
     detect whether the result was capped by the limit.
+
+    Builder methods return a new builder (Mojo value semantics): bind the
+    result, e.g. ``var q = db.query(t).where("pk", params)``.
     """
 
     var _client: MongrelDB
@@ -34,8 +38,8 @@ struct QueryBuilder:
     var _has_offset: Bool
     var _last_truncated: Bool
 
-    fn __init__(client: MongrelDB, table: String):
-        self._client = client
+    fn __init__(out self, client: MongrelDB, table: String):
+        self._client = client.copy()
         self._table = table
         self._conditions = List[PythonObject]()
         self._projection = PythonObject()  # None
@@ -44,69 +48,73 @@ struct QueryBuilder:
         self._has_offset = False
         self._last_truncated = False
 
-    fn where(self, cond_type: String, params: PythonObject) -> Self:
+    fn where(read self, cond_type: String, params: PythonObject) raises -> Self:
         """Add a native condition (AND-ed). Friendly aliases are accepted.
 
         Available condition types include ``pk``, ``bitmap_eq``, ``bitmap_in``,
         ``range``, ``range_f64``, ``is_null``, ``is_not_null``, ``fm_contains``,
         ``fm_contains_all``, ``ann``, ``sparse_match``, ``min_hash_similar``.
         """
-        entry = Python.dict()
-        entry.__setitem__(cond_type, _normalize_condition(cond_type, params))
-        self._conditions.append(entry)
-        return self
+        var copy = self.copy()
+        var entry = Python.dict()
+        entry[cond_type] = _normalize_condition(cond_type, params)
+        copy._conditions.append(entry)
+        return copy^
 
-    fn projection(self, column_ids: PythonObject) -> Self:
+    fn projection(read self, column_ids: PythonObject) -> Self:
         """Set the column ids to return. None means all columns."""
-        self._projection = column_ids
-        return self
+        var copy = self.copy()
+        copy._projection = column_ids
+        return copy^
 
-    fn limit(self, n: Int) -> Self:
+    fn limit(read self, n: Int) -> Self:
         """Cap the number of rows returned."""
-        self._limit = n
-        return self
+        var copy = self.copy()
+        copy._limit = n
+        return copy^
 
-    fn offset(self, n: Int) -> Self:
+    fn offset(read self, n: Int) -> Self:
         """Skip matching rows before applying the limit."""
-        self._offset = n
-        self._has_offset = True
-        return self
+        var copy = self.copy()
+        copy._offset = n
+        copy._has_offset = True
+        return copy^
 
-    fn build(self) -> PythonObject:
+    fn build(self) raises -> PythonObject:
         """Build the request payload that will be sent to /kit/query."""
-        payload = Python.dict()
-        payload.__setitem__("table", Python.str(self._table))
+        var payload = Python.dict()
+        payload["table"] = self._table
         if len(self._conditions) > 0:
-            conds = Python.list()
+            var conds = Python.list()
             for c in self._conditions:
                 conds.append(c)
-            payload.__setitem__("conditions", conds)
+            payload["conditions"] = conds
         if self._projection:
-            payload.__setitem__("projection", self._projection)
+            payload["projection"] = self._projection
         if self._limit >= 0:
-            payload.__setitem__("limit", Python.object(self._limit))
+            payload["limit"] = self._limit
         if self._has_offset:
-            payload.__setitem__("offset", Python.object(self._offset))
+            payload["offset"] = self._offset
         return payload
 
-    fn execute(self) -> PythonObject:
+    fn execute(mut self) raises -> PythonObject:
         """Run the query and return the matching rows. Records the truncated
         flag; check it with ``truncated``."""
-        body = self._client._post("/kit/query", self.build())
-        out = Python.list()
-        truncated = False
+        var body = self._client._post("/kit/query", self.build())
+        var out = Python.list()
+        var truncated = False
         if len(body) > 0:
             try:
-                parsed = Python.import_module("json").loads(Python.bytes(body))
+                var parsed = Python.import_module("json").loads(body)
                 try:
-                    rows = parsed.__getitem__("rows")
+                    var rows = parsed["rows"]
                     if rows is not None:
-                        for r in rows.to_list():
+                        for r in rows:
                             out.append(r)
                 except:
                     pass
                 try:
-                    t = parsed.__getitem__("truncated")
+                    var t = parsed["truncated"]
                     if t:
                         truncated = Bool(t)
                 except:
@@ -129,10 +137,9 @@ def _normalize_condition(cond_type: String, params: PythonObject) -> PythonObjec
     """Translate friendly parameter aliases to the server's canonical on-wire
     keys. The value->pattern alias applies only to FTS conditions."""
     normalized = Python.dict()
-    items = params.items()
-    for kv in items:
-        key = String(kv.__getitem__(0))
-        value = kv.__getitem__(1)
+    for kv in params.items():
+        key = String(kv[0])
+        value = kv[1]
         canonical = key
         if key == "column":
             canonical = "column_id"
@@ -147,5 +154,5 @@ def _normalize_condition(cond_type: String, params: PythonObject) -> PythonObjec
         elif key == "value":
             if cond_type == "fm_contains" or cond_type == "fm_contains_all":
                 canonical = "pattern"
-        normalized.__setitem__(canonical, value)
+        normalized[canonical] = value
     return normalized

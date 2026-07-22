@@ -1,11 +1,11 @@
-from python import Python
+from python import Python, PythonObject
 from mongreldb import _create_table_payload, MongrelDB
 from mongreldb.mongreldb import _history_retention_payload
 from mongreldb.errors import MongrelDBError
 
 
 def assert_contains(body: String, needle: String):
-    if not body.contains(needle):
+    if needle not in body:
         raise Error("missing " + needle + " in " + body)
 
 
@@ -17,70 +17,70 @@ def assert_true(cond: Bool):
 def test_create_table_wire_shape():
     columns = Python.list()
     status = Python.dict()
-    status.__setitem__("id", 2)
-    status.__setitem__("name", "status")
-    status.__setitem__("ty", "enum")
+    status["id"] = 2
+    status["name"] = "status"
+    status["ty"] = "enum"
     variants = Python.list()
     variants.append("open")
     variants.append("closed")
-    status.__setitem__("enum_variants", variants)
+    status["enum_variants"] = variants
     columns.append(status)
 
     created_at = Python.dict()
-    created_at.__setitem__("id", 3)
-    created_at.__setitem__("name", "created_at")
-    created_at.__setitem__("ty", "timestamp_nanos")
-    created_at.__setitem__("default_expr", "now")
+    created_at["id"] = 3
+    created_at["name"] = "created_at"
+    created_at["ty"] = "timestamp_nanos"
+    created_at["default_expr"] = "now"
     columns.append(created_at)
 
     attempts = Python.dict()
-    attempts.__setitem__("id", 4)
-    attempts.__setitem__("name", "attempts")
-    attempts.__setitem__("ty", "int64")
-    attempts.__setitem__("default_value", 3)
+    attempts["id"] = 4
+    attempts["name"] = "attempts"
+    attempts["ty"] = "int64"
+    attempts["default_value"] = 3
     columns.append(attempts)
 
     string_default = Python.dict()
-    string_default.__setitem__("default_value", "draft")
+    string_default["default_value"] = "draft"
     columns.append(string_default)
     bool_default = Python.dict()
-    bool_default.__setitem__("default_value", True)
+    bool_default["default_value"] = True
     columns.append(bool_default)
     null_default = Python.dict()
-    null_default.__setitem__("default_value", None)
+    null_default["default_value"] = None
     columns.append(null_default)
 
     literal_now = Python.dict()
-    literal_now.__setitem__("default_value", "now")
+    literal_now["default_value"] = "now"
     columns.append(literal_now)
 
     check = Python.dict()
-    check.__setitem__("id", 1)
-    check.__setitem__("name", "id_present")
+    check["id"] = 1
+    check["name"] = "id_present"
     expr = Python.dict()
-    expr.__setitem__("IsNotNull", 1)
-    check.__setitem__("expr", expr)
+    expr["IsNotNull"] = 1
+    check["expr"] = expr
     constraints = Python.dict()
     checks = Python.list()
     checks.append(check)
-    constraints.__setitem__("checks", checks)
+    constraints["checks"] = checks
 
     diskann = Python.dict()
-    diskann.__setitem__("r", 64)
-    diskann.__setitem__("l", 128)
-    diskann.__setitem__("beam_width", 8)
-    diskann.__setitem__("alpha", 120)
+    diskann["r"] = 64
+    diskann["l"] = 128
+    diskann["beam_width"] = 8
+    diskann["alpha"] = 120
     ann = Python.dict()
-    ann.__setitem__("algorithm", "diskann")
-    ann.__setitem__("quantization", "dense")
-    ann.__setitem__("diskann", diskann)
+    ann["algorithm"] = "diskann"
+    ann["quantization"] = "dense"
+    ann["diskann"] = diskann
     options = Python.dict()
-    options.__setitem__("ann", ann)
+    options["ann"] = ann
     index = Python.dict()
-    index.__setitem__("name", "ann")
-    index.__setitem__("column_id", 2)
-    index.__setitem__("kind", "ann")
-    index.__setitem__("options", options)
+    index["name"] = "ann"
+    index["column_id"] = 2
+    index["kind"] = "ann"
+    index["options"] = options
     indexes = Python.list()
     indexes.append(index)
 
@@ -194,11 +194,11 @@ def _boot_mock_retention_server() -> PythonObject:
     )
     ns = Python.dict()
     builtins.exec(src, ns)
-    return ns.__getitem__("handle")
+    return ns["handle"]
 
 
 def _stop_mock_server(handle: PythonObject):
-    stop = handle.__getitem__("stop")
+    stop = handle["stop"]
     stop()
 
 
@@ -206,22 +206,22 @@ def test_set_history_retention_uses_put_transport():
     """set_history_retention_epochs must issue PUT /history/retention with the
     history_retention_epochs body key, through the real HTTP transport."""
     handle = _boot_mock_retention_server()
-    port = Int(handle.__getitem__("port"))
+    port = Int(handle["port"])
     db = MongrelDB("http://127.0.0.1:" + String(port))
 
     resp = db.set_history_retention_epochs(99)
     # Server echoes the PUT value back through the transport decode path.
-    assert_true(Int(resp.__getitem__("history_retention_epochs")) == 99)
-    assert_true(Int(resp.__getitem__("earliest_retained_epoch")) == 7)
+    assert_true(Int(resp["history_retention_epochs"]) == 99)
+    assert_true(Int(resp["earliest_retained_epoch"]) == 7)
 
-    raw = handle.__getitem__("records").to_list()
+    raw = handle["records"]
     assert_true(len(raw) >= 1)
     rec = raw[len(raw) - 1]
-    assert_true(String(rec.__getitem__("method")) == "PUT")
-    path = String(rec.__getitem__("path"))
-    if not path.contains("/history/retention"):
+    assert_true(String(rec["method"]) == "PUT")
+    path = String(rec["path"])
+    if "/history/retention" not in path:
         raise Error("expected /history/retention path, got " + path)
-    body = String(rec.__getitem__("body"))
+    body = String(rec["body"])
     assert_contains(body, "\"history_retention_epochs\"")
     assert_contains(body, "99")
 
@@ -232,7 +232,7 @@ def test_history_retention_epochs_uses_get_transport():
     """history_retention_epochs must GET /history/retention and decode both
     response keys through the real transport."""
     handle = _boot_mock_retention_server()
-    port = Int(handle.__getitem__("port"))
+    port = Int(handle["port"])
     db = MongrelDB("http://127.0.0.1:" + String(port))
 
     epochs = db.history_retention_epochs()
@@ -240,13 +240,13 @@ def test_history_retention_epochs_uses_get_transport():
     earliest = db.earliest_retained_epoch()
     assert_true(earliest == 7)
 
-    raw = handle.__getitem__("records").to_list()
+    raw = handle["records"]
     assert_true(len(raw) >= 2)
     for i in range(len(raw)):
         rec = raw[i]
-        assert_true(String(rec.__getitem__("method")) == "GET")
-        path = String(rec.__getitem__("path"))
-        if not path.contains("/history/retention"):
+        assert_true(String(rec["method"]) == "GET")
+        path = String(rec["path"])
+        if "/history/retention" not in path:
             raise Error("expected /history/retention path, got " + path)
 
     _stop_mock_server(handle)
@@ -256,16 +256,16 @@ def test_history_retention_propagates_non_2xx():
     """A non-2xx /history/retention response must surface as a typed
     MongrelDBError, proving the transport maps status codes to exceptions."""
     handle = _boot_mock_retention_server()
-    port = Int(handle.__getitem__("port"))
-    controls = handle.__getitem__("controls")
+    port = Int(handle["port"])
+    controls = handle["controls"]
     db = MongrelDB("http://127.0.0.1:" + String(port))
 
     envelope = Python.dict()
-    envelope.__setitem__("message", "service unavailable")
+    envelope["message"] = "service unavailable"
     override = Python.list()
     override.append(503)
     override.append(envelope)
-    controls.__setitem__("status_override", override)
+    controls["status_override"] = override
 
     var raised = False
     try:
@@ -275,3 +275,15 @@ def test_history_retention_propagates_non_2xx():
     assert_true(raised)
 
     _stop_mock_server(handle)
+
+
+# ── Runner (mojo run; the standalone `mojo test` command no longer exists) ──
+
+
+fn main() raises:
+    test_create_table_wire_shape()
+    test_history_retention_wire_shape()
+    test_set_history_retention_uses_put_transport()
+    test_history_retention_epochs_uses_get_transport()
+    test_history_retention_propagates_non_2xx()
+    print("wire_shape_test: all tests passed")

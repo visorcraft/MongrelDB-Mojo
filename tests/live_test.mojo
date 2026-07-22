@@ -1,19 +1,21 @@
 # Live integration tests for the MongrelDB Mojo client.
 #
-# These tests boot a real mongreldb-server daemon and exercise the full client
-# surface against it (the 14-operation conformance matrix). They resolve the
-# daemon binary in this order:
-#   1. the MONGRELDB_SERVER env var (path to the server binary)
-#   2. a prebuilt binary at ./bin/mongreldb-server
-#   3. mongreldb-server on PATH
+# These tests exercise the full client surface against a real mongreldb-server
+# daemon (the 14-operation conformance matrix). The daemon is resolved in this
+# order:
+#   1. the MONGRELDB_URL env var (an already-running daemon)
+#   2. the MONGRELDB_SERVER env var (path to a server binary to boot)
+#   3. a prebuilt binary at ./bin/mongreldb-server
+#   4. mongreldb-server on PATH
 #
-# If no binary is available, the live tests are skipped (the offline tests still
-# run). Set MONGRELDB_URL to point at an already-running daemon to skip the boot
-# and connect directly.
+# If no daemon is available, the live tests are skipped (the offline tests
+# still run). When the tests boot a daemon themselves they register it with
+# atexit and publish its URL via MONGRELDB_URL so it is shared across tests.
 #
-# Run with:   mojo test -I src tests/live_test.mojo
+# Run with:   mojo run -I src tests/live_test.mojo
 
-from python import Python
+from python import Python, PythonObject
+from collections import List, Optional
 from mongreldb import (
     MongrelDB,
     DEFAULT_BASE_URL,
@@ -39,53 +41,56 @@ def assert_false(cond: Bool):
         raise Error("assertion failed: expected False")
 
 
-def assert_equal[T: EqualityComparable](a: T, b: T):
+def assert_equal[T: EqualityComparable & Stringable & ImplicitlyCopyable](a: T, b: T):
     if a != b:
         raise Error("assertion failed: " + String(a) + " != " + String(b))
 
 
-# ── Daemon lifecycle (module-global) ────────────────────────────────────────
-
-var db: MongrelDB
-var _server_proc: PythonObject
-var _have_daemon: Bool = False
+# ── Daemon lifecycle ────────────────────────────────────────────────────────
 
 
-def _start_daemon():
-    """Boot a real mongreldb-server once, or reuse MONGRELDB_URL."""
-    global db, _have_daemon, _server_proc
-
+def _connect() -> Optional[MongrelDB]:
+    """Connect to a running daemon, booting one from a local binary if needed.
+    Returns None when no daemon is available so live tests can skip."""
     os_module = Python.import_module("os")
-    subprocess_module = Python.import_module("subprocess")
-    socket_module = Python.import_module("socket")
-    time_module = Python.import_module("time")
-    tempfile_module = Python.import_module("tempfile")
-
     existing = String(os_module.environ.get("MONGRELDB_URL", ""))
     if len(existing) > 0:
         db = MongrelDB(existing, String(os_module.environ.get("MONGRELDB_TOKEN", "")))
         if db.health():
-            _have_daemon = True
-            return
+            return Optional(db^)
         print("mongreldb: MONGRELDB_URL=" + existing + " is not reachable")
+        return None
 
     bin_path = _resolve_server_binary(os_module)
     if len(bin_path) == 0:
         print("--- no mongreldb-server binary: live tests will skip")
-        return
+        return None
+
+    socket_module = Python.import_module("socket")
+    subprocess_module = Python.import_module("subprocess")
+    time_module = Python.import_module("time")
+    tempfile_module = Python.import_module("tempfile")
+    atexit_module = Python.import_module("atexit")
 
     # Find a free port.
     sock = socket_module.socket()
-    sock.bind(("127.0.0.1", 0))
-    port = Int(sock.getsockname().__getitem__(1))
+    sock.bind(Python.evaluate("('127.0.0.1', 0)"))
+    port = Int(sock.getsockname()[1])
     sock.close()
 
     data_dir = tempfile_module.mkdtemp(prefix="mongreldb-mojo-test-")
-    _server_proc = subprocess_module.Popen(
-        [bin_path, data_dir, "--port", String(port)],
+    args = Python.list()
+    args.append(bin_path)
+    args.append(String(data_dir))
+    args.append("--port")
+    args.append(String(port))
+    proc = subprocess_module.Popen(
+        args,
         stdout=subprocess_module.PIPE,
         stderr=subprocess_module.STDOUT,
     )
+    atexit_module.register(proc.kill)
+
     url = "http://127.0.0.1:" + String(port)
     deadline = time_module.time() + 40.0
     ok = False
@@ -98,25 +103,26 @@ def _start_daemon():
 
     if not ok:
         print("mongreldb: server did not become healthy")
-        _kill(_server_proc)
-        return
+        proc.kill()
+        return None
 
-    db = MongrelDB(url)
-    _have_daemon = True
+    # Share the booted daemon with the remaining tests in this process.
+    os_module.environ["MONGRELDB_URL"] = url
+    return Optional(MongrelDB(url))
 
 
 def _resolve_server_binary(os_module: PythonObject) -> String:
     env = String(os_module.environ.get("MONGRELDB_SERVER", ""))
     path_module = Python.import_module("os.path")
-    if len(env) > 0 and path_module.isfile(env) and _is_executable(env):
+    if len(env) > 0 and Bool(path_module.isfile(env)) and _is_executable(env):
         return env
     local = "bin/mongreldb-server"
-    if path_module.isfile(local) and _is_executable(local):
+    if Bool(path_module.isfile(local)) and _is_executable(local):
         return local
     # Search PATH.
     for d in String(os_module.environ.get("PATH", "")).split(":"):
         candidate = d + "/mongreldb-server"
-        if path_module.isfile(candidate) and _is_executable(candidate):
+        if Bool(path_module.isfile(candidate)) and _is_executable(candidate):
             return candidate
     return ""
 
@@ -124,21 +130,6 @@ def _resolve_server_binary(os_module: PythonObject) -> String:
 def _is_executable(path: String) -> Bool:
     os_module = Python.import_module("os")
     return Bool(os_module.access(path, os_module.X_OK))
-
-
-def _kill(proc: PythonObject):
-    try:
-        proc.terminate()
-        proc.wait(timeout=5)
-    except:
-        try:
-            proc.kill()
-        except:
-            pass
-
-
-def _require_daemon() -> Bool:
-    return _have_daemon
 
 
 # ── Test helpers ────────────────────────────────────────────────────────────
@@ -151,58 +142,68 @@ def _unique_table(prefix: String) -> String:
 
 def _int_col(col_id: Int, name: String, primary_key: Bool = False) -> PythonObject:
     c = Python.dict()
-    c.__setitem__("id", Python.object(col_id))
-    c.__setitem__("name", Python.str(name))
-    c.__setitem__("ty", "int64")
-    c.__setitem__("primary_key", Python.object(primary_key))
-    c.__setitem__("nullable", Python.object(False))
+    c["id"] = col_id
+    c["name"] = name
+    c["ty"] = "int64"
+    c["primary_key"] = primary_key
+    c["nullable"] = False
     return c
 
 
 def _float_col(col_id: Int, name: String) -> PythonObject:
     c = Python.dict()
-    c.__setitem__("id", Python.object(col_id))
-    c.__setitem__("name", Python.str(name))
-    c.__setitem__("ty", "float64")
-    c.__setitem__("primary_key", Python.object(False))
-    c.__setitem__("nullable", Python.object(False))
+    c["id"] = col_id
+    c["name"] = name
+    c["ty"] = "float64"
+    c["primary_key"] = False
+    c["nullable"] = False
     return c
 
 
 def _string_col(col_id: Int, name: String) -> PythonObject:
     c = Python.dict()
-    c.__setitem__("id", Python.object(col_id))
-    c.__setitem__("name", Python.str(name))
-    c.__setitem__("ty", "varchar")
-    c.__setitem__("primary_key", Python.object(False))
-    c.__setitem__("nullable", Python.object(False))
+    c["id"] = col_id
+    c["name"] = name
+    c["ty"] = "varchar"
+    c["primary_key"] = False
+    c["nullable"] = False
     return c
 
 
-def _fresh_table(name: String, *columns: PythonObject) -> None:
+def _cols(a: PythonObject, b: Optional[PythonObject] = None) -> PythonObject:
+    """Build the columns list for create_table (one or two column dicts)."""
+    cols = Python.list()
+    cols.append(a)
+    if b:
+        cols.append(b.value())
+    return cols
+
+
+def _fresh_table(db: MongrelDB, name: String, columns: PythonObject) -> None:
     try:
         db.drop_table(name)
     except:
         pass
-    cols = Python.list()
-    for c in columns:
-        cols.append(c)
-    db.create_table(name, cols)
+    _ = db.create_table(name, columns)
 
 
-def _cells(*kvs: PythonObject) -> PythonObject:
+def _cells1(k1: PythonObject, v1: PythonObject) -> PythonObject:
     d = Python.dict()
-    i = 0
-    while i < len(kvs):
-        d.__setitem__(kvs[i], kvs[i + 1])
-        i += 2
+    d[k1] = v1
+    return d
+
+
+def _cells2(k1: PythonObject, v1: PythonObject, k2: PythonObject, v2: PythonObject) -> PythonObject:
+    d = Python.dict()
+    d[k1] = v1
+    d[k2] = v2
     return d
 
 
 def _cell_value(row: PythonObject, col_id: Int) -> PythonObject:
     """Extract a column value from a Kit row's flat cells array."""
     try:
-        cells = row.__getitem__("cells").to_list()
+        cells = row["cells"]
         i = 0
         while i < len(cells):
             if Int(cells[i]) == col_id:
@@ -217,192 +218,234 @@ def _cell_value(row: PythonObject, col_id: Int) -> PythonObject:
 
 
 def test_health():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     assert_true(db.health())
 
 
 def test_create_table_and_count():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     name = _unique_table("mojo_create")
-    _fresh_table(name, _int_col(1, "id", True), _float_col(2, "amount"))
+    _fresh_table(db, name, _cols(_int_col(1, "id", True), _float_col(2, "amount")))
     assert_equal(db.count(name), 0)
 
 
 def test_put_and_count_round_trip():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     name = _unique_table("mojo_put")
-    _fresh_table(name, _int_col(1, "id", True), _float_col(2, "amount"))
-    db.put(name, _cells(1, 1, 2, 99.5))
-    db.put(name, _cells(1, 2, 2, 150.0))
+    _fresh_table(db, name, _cols(_int_col(1, "id", True), _float_col(2, "amount")))
+    _ = db.put(name, _cells2(1, 1, 2, 99.5))
+    _ = db.put(name, _cells2(1, 2, 2, 150.0))
     assert_equal(db.count(name), 2)
 
 
 def test_query_by_pk():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     name = _unique_table("mojo_pk")
-    _fresh_table(name, _int_col(1, "id", True))
-    db.put(name, _cells(1, 42))
-    db.put(name, _cells(1, 43))
+    _fresh_table(db, name, _cols(_int_col(1, "id", True)))
+    _ = db.put(name, _cells1(1, 42))
+    _ = db.put(name, _cells1(1, 43))
     params = Python.dict()
-    params.__setitem__("value", 42)
-    rows = db.query(name).where("pk", params).execute().to_list()
+    params["value"] = 42
+    var q = db.query(name).where("pk", params)
+    var rows = q.execute()
     assert_equal(len(rows), 1)
     assert_equal(Int(_cell_value(rows[0], 1)), 42)
 
 
 def test_query_range():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     name = _unique_table("mojo_range")
-    _fresh_table(name, _int_col(1, "id", True), _int_col(2, "amount"))
-    db.put(name, _cells(1, 1, 2, 50))
-    db.put(name, _cells(1, 2, 2, 120))
-    db.put(name, _cells(1, 3, 2, 200))
+    _fresh_table(db, name, _cols(_int_col(1, "id", True), _int_col(2, "amount")))
+    _ = db.put(name, _cells2(1, 1, 2, 50))
+    _ = db.put(name, _cells2(1, 2, 2, 120))
+    _ = db.put(name, _cells2(1, 3, 2, 200))
     params = Python.dict()
-    params.__setitem__("column", 2)
-    params.__setitem__("min", 100)
-    params.__setitem__("max", 150)
-    q = db.query(name).where("range", params)
-    rows = q.execute().to_list()
+    params["column"] = 2
+    params["min"] = 100
+    params["max"] = 150
+    var q = db.query(name).where("range", params)
+    var rows = q.execute()
     assert_equal(len(rows), 1)
     assert_false(q.truncated())
 
 
 def test_upsert():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     name = _unique_table("mojo_upsert")
-    _fresh_table(name, _int_col(1, "id", True), _int_col(2, "amount"))
-    db.put(name, _cells(1, 1, 2, 50))
+    _fresh_table(db, name, _cols(_int_col(1, "id", True), _int_col(2, "amount")))
+    _ = db.put(name, _cells2(1, 1, 2, 50))
     upd = Python.dict()
-    upd.__setitem__(2, 999)
-    db.upsert(name, _cells(1, 1, 2, 50), upd)
+    upd[2] = 999
+    _ = db.upsert(name, _cells2(1, 1, 2, 50), upd)
     assert_equal(db.count(name), 1)
     params = Python.dict()
-    params.__setitem__("value", 1)
-    rows = db.query(name).where("pk", params).execute().to_list()
+    params["value"] = 1
+    var q = db.query(name).where("pk", params)
+    var rows = q.execute()
     assert_equal(len(rows), 1)
     assert_equal(Int(_cell_value(rows[0], 2)), 999)
 
 
 def test_transaction_put_commit():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     name = _unique_table("mojo_txn")
-    _fresh_table(name, _int_col(1, "id", True))
-    txn = db.begin()
-    txn.put(name, _cells(1, 1))
-    txn.put(name, _cells(1, 2))
-    txn.put(name, _cells(1, 3))
+    _fresh_table(db, name, _cols(_int_col(1, "id", True)))
+    var txn = db.begin()
+    _ = txn.put(name, _cells1(1, 1))
+    _ = txn.put(name, _cells1(1, 2))
+    _ = txn.put(name, _cells1(1, 3))
     assert_equal(txn.count(), 3)
-    results = txn.commit()
+    var results = txn.commit()
     assert_equal(len(results), 3)
     assert_equal(db.count(name), 3)
 
 
 def test_transaction_rollback():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     name = _unique_table("mojo_rb")
-    _fresh_table(name, _int_col(1, "id", True))
-    txn = db.begin()
-    txn.put(name, _cells(1, 1))
+    _fresh_table(db, name, _cols(_int_col(1, "id", True)))
+    var txn = db.begin()
+    _ = txn.put(name, _cells1(1, 1))
     txn.rollback()
     assert_equal(db.count(name), 0)
 
 
 def test_idempotent_put():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     name = _unique_table("mojo_idem")
-    _fresh_table(name, _int_col(1, "id", True))
+    _fresh_table(db, name, _cols(_int_col(1, "id", True)))
     key = "idem-" + name
-    db.put(name, _cells(1, 7), key)
-    db.put(name, _cells(1, 7), key)
+    _ = db.put(name, _cells1(1, 7), key)
+    _ = db.put(name, _cells1(1, 7), key)
     assert_equal(db.count(name), 1)
 
 
 def test_delete_by_pk():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     name = _unique_table("mojo_del")
-    _fresh_table(name, _int_col(1, "id", True))
-    db.put(name, _cells(1, 5))
+    _fresh_table(db, name, _cols(_int_col(1, "id", True)))
+    _ = db.put(name, _cells1(1, 5))
     assert_equal(db.count(name), 1)
     db.delete_by_pk(name, 5)
     assert_equal(db.count(name), 0)
 
 
 def test_sql_insert_and_select():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     name = _unique_table("mojo_sql")
-    _fresh_table(name, _int_col(1, "id", True), _int_col(2, "amount"))
+    _fresh_table(db, name, _cols(_int_col(1, "id", True), _int_col(2, "amount")))
     assert_equal(db.count(name), 0)
-    db.sql("INSERT INTO " + name + " (id, amount) VALUES (10, 42)")
+    _ = db.sql("INSERT INTO " + name + " (id, amount) VALUES (10, 42)")
     assert_equal(db.count(name), 1)
-    rows = db.sql("SELECT id, amount FROM " + name).to_list()
+    var rows = db.sql("SELECT id, amount FROM " + name)
     if len(rows) > 0:
         assert_equal(len(rows), 1)
 
 
 def test_table_names():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     name = _unique_table("mojo_tables")
-    _fresh_table(name, _int_col(1, "id", True))
-    names = [String(n) for n in db.table_names()]
-    assert_true(name in names)
+    _fresh_table(db, name, _cols(_int_col(1, "id", True)))
+    var names = db.table_names()
+    var found = False
+    for n in names:
+        if n == name:
+            found = True
+    assert_true(found)
 
 
 def test_schema():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     name = _unique_table("mojo_schema")
-    _fresh_table(name, _int_col(1, "id", True), _float_col(2, "amount"))
-    schema = db.schema()
-    assert_true(name in [String(k) for k in schema.keys().to_list()])
+    _fresh_table(db, name, _cols(_int_col(1, "id", True), _float_col(2, "amount")))
+    var schema = db.schema()
+    var found = False
+    for k in schema.keys():
+        if String(k) == name:
+            found = True
+    assert_true(found)
 
 
 def test_error_404():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     name = _unique_table("mojo_missing")
     var raised = False
     try:
-        db.schema_for(name)
+        _ = db.schema_for(name)
     except NotFoundError:
         raised = True
     assert_true(raised)
 
 
 def test_history_retention():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     original = db.history_retention_epochs()
     try:
         result = db.set_history_retention_epochs(1000)
-        assert_equal(Int(result.__getitem__("history_retention_epochs")), 1000)
-        assert_true(Int(result.__getitem__("earliest_retained_epoch")) <= 1000)
+        assert_equal(Int(result["history_retention_epochs"]), 1000)
+        assert_true(Int(result["earliest_retained_epoch"]) <= 1000)
         assert_equal(db.history_retention_epochs(), 1000)
         assert_true(db.earliest_retained_epoch() <= 1000)
     finally:
-        db.set_history_retention_epochs(original)
+        _ = db.set_history_retention_epochs(original)
 
 
 def test_history_retention_read_as_of_epoch():
-    if not _require_daemon():
+    var maybe = _connect()
+    if not maybe:
         return
+    var db = maybe.unsafe_take()
     original = db.history_retention_epochs()
     try:
-        db.set_history_retention_epochs(1000)
+        _ = db.set_history_retention_epochs(1000)
 
         name = _unique_table("mojo_retention")
-        _fresh_table(name, _int_col(1, "id", True), _string_col(2, "label"))
+        _fresh_table(db, name, _cols(_int_col(1, "id", True), _string_col(2, "label")))
 
         # Insert the initial row and capture the commit epoch.
         # The public CRUD helpers discard the top-level commit epoch, so we use
@@ -413,57 +456,55 @@ def test_history_retention_read_as_of_epoch():
         ops = Python.list()
         op = Python.dict()
         put = Python.dict()
-        put.__setitem__("table", name)
+        put["table"] = name
         put_cells = Python.list()
         put_cells.append(1)
         put_cells.append(1)
         put_cells.append(2)
         put_cells.append("first")
-        put.__setitem__("cells", put_cells)
-        op.__setitem__("put", put)
+        put["cells"] = put_cells
+        op["put"] = put
         ops.append(op)
-        payload.__setitem__("ops", ops)
-        txn_body = Bytes(json.dumps(payload).encode("utf-8"))
-        txn_resp = _decode_json_or(json, db._post("/kit/txn", txn_body), Python.dict())
-        write_epoch = Int(txn_resp.__getitem__("epoch"))
+        payload["ops"] = ops
+        txn_resp = _decode_json_or(json, db._post("/kit/txn", payload), Python.dict())
+        write_epoch = Int(txn_resp["epoch"])
 
         # Update the row so a later epoch exists.
         payload2 = Python.dict()
         ops2 = Python.list()
         op2 = Python.dict()
         upsert = Python.dict()
-        upsert.__setitem__("table", name)
+        upsert["table"] = name
         ups_cells = Python.list()
         ups_cells.append(1)
         ups_cells.append(1)
         ups_cells.append(2)
         ups_cells.append("second")
-        upsert.__setitem__("cells", ups_cells)
+        upsert["cells"] = ups_cells
         ups_update = Python.list()
         ups_update.append(2)
         ups_update.append("second")
-        upsert.__setitem__("update_cells", ups_update)
-        op2.__setitem__("upsert", upsert)
+        upsert["update_cells"] = ups_update
+        op2["upsert"] = upsert
         ops2.append(op2)
-        payload2.__setitem__("ops", ops2)
-        txn_body2 = Bytes(json.dumps(payload2).encode("utf-8"))
-        txn_resp2 = _decode_json_or(json, db._post("/kit/txn", txn_body2), Python.dict())
-        update_epoch = Int(txn_resp2.__getitem__("epoch"))
+        payload2["ops"] = ops2
+        txn_resp2 = _decode_json_or(json, db._post("/kit/txn", payload2), Python.dict())
+        update_epoch = Int(txn_resp2["epoch"])
         assert_true(update_epoch > write_epoch)
 
         # Current value is "second".
-        current = db.sql("SELECT label FROM " + name + " WHERE id = 1").to_list()
+        current = db.sql("SELECT label FROM " + name + " WHERE id = 1")
         assert_equal(len(current), 1)
-        assert_equal(String(current[0].__getitem__("label")), "second")
+        assert_equal(String(current[0]["label"]), "second")
 
         # Historical read at the original write epoch should still see "first".
         historical = db.sql(
             "SELECT label FROM " + name + " AS OF EPOCH " + String(write_epoch) + " WHERE id = 1"
-        ).to_list()
+        )
         assert_equal(len(historical), 1)
-        assert_equal(String(historical[0].__getitem__("label")), "first")
+        assert_equal(String(historical[0]["label"]), "first")
     finally:
-        db.set_history_retention_epochs(original)
+        _ = db.set_history_retention_epochs(original)
 
 
 # ── Offline tests (always run, no daemon) ───────────────────────────────────
@@ -486,38 +527,63 @@ def test_trailing_slash_stripped():
 
 def test_query_builder_alias_translation():
     params = Python.dict()
-    params.__setitem__("column", 3)
-    params.__setitem__("min", 100)
-    params.__setitem__("max", 150)
-    params.__setitem__("min_inclusive", True)
-    params.__setitem__("max_inclusive", False)
+    params["column"] = 3
+    params["min"] = 100
+    params["max"] = 150
+    params["min_inclusive"] = True
+    params["max_inclusive"] = False
     out = _normalize_condition("range", params)
-    assert_equal(Int(out.__getitem__("column_id")), 3)
-    assert_equal(Int(out.__getitem__("lo")), 100)
-    assert_equal(Int(out.__getitem__("hi")), 150)
-    assert_true(Bool(out.__getitem__("lo_inclusive")))
-    assert_false(Bool(out.__getitem__("hi_inclusive")))
+    assert_equal(Int(out["column_id"]), 3)
+    assert_equal(Int(out["lo"]), 100)
+    assert_equal(Int(out["hi"]), 150)
+    assert_true(Bool(out["lo_inclusive"]))
+    assert_false(Bool(out["hi_inclusive"]))
 
 
 def test_query_builder_fm_contains_value_alias():
     params = Python.dict()
-    params.__setitem__("column", 2)
-    params.__setitem__("value", "database")
+    params["column"] = 2
+    params["value"] = "database"
     out = _normalize_condition("fm_contains", params)
-    assert_equal(String(out.__getitem__("pattern")), "database")
+    assert_equal(String(out["pattern"]), "database")
 
 
 def test_query_builder_pk_value_not_aliased():
     params = Python.dict()
-    params.__setitem__("value", 42)
+    params["value"] = 42
     out = _normalize_condition("pk", params)
-    assert_equal(Int(out.__getitem__("value")), 42)
+    assert_equal(Int(out["value"]), 42)
 
 
 def test_url_path_escape_encodes_slash():
     assert_equal(_url_path_escape("a/b c"), "a%2Fb%20c")
 
 
-# ── Boot the daemon once at import time ─────────────────────────────────────
+# ── Runner (mojo run; the standalone `mojo test` command no longer exists) ──
 
-_start_daemon()
+
+fn main() raises:
+    test_health()
+    test_create_table_and_count()
+    test_put_and_count_round_trip()
+    test_query_by_pk()
+    test_query_range()
+    test_upsert()
+    test_transaction_put_commit()
+    test_transaction_rollback()
+    test_idempotent_put()
+    test_delete_by_pk()
+    test_sql_insert_and_select()
+    test_table_names()
+    test_schema()
+    test_error_404()
+    test_history_retention()
+    test_history_retention_read_as_of_epoch()
+    test_health_returns_false_when_unreachable()
+    test_default_base_url()
+    test_trailing_slash_stripped()
+    test_query_builder_alias_translation()
+    test_query_builder_fm_contains_value_alias()
+    test_query_builder_pk_value_not_aliased()
+    test_url_path_escape_encodes_slash()
+    print("live_test: all tests passed")

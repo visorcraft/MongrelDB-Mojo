@@ -15,4 +15,4 @@ authors = ["VisorCraft LLC"]
 # No third-party Python dependencies; uses the standard library (urllib/json).
 
 # Source layout: the client package lives under src/mongreldb/. Tests and
-# examples import it via `mojo test -I src` / `mojo run -I src`.
+# examples import it via `mojo run -I src` / `mojo run -I src`.

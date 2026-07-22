@@ -4,7 +4,7 @@ MongrelDB ships a DataFusion-backed SQL engine at `POST /sql`. From Mojo, run
 SQL with `db.sql(...)`:
 
 ```mojo
-let rows = db.sql("SELECT 1")
+var rows = db.sql("SELECT 1")
 ```
 
 ---
@@ -22,29 +22,31 @@ empty list otherwise.
   IPC (`format: "arrow"`) when the server supports it, or use the native
   `QueryBuilder` for typed row retrieval.
 
-Errors are mapped to the typed errors: HTTP 400/5xx raises `QueryError`; 409
-raises `ConflictError`.
+Errors are mapped to the typed error categories: HTTP 400/5xx raises
+`QueryError`; 409 raises `ConflictError`. Match the category prefix in the
+error message:
 
 ```mojo
 try:
-    db.sql("INSERT INTO orders (id, amount) VALUES (99, 999.0)")
-except ConflictError:
-    print("duplicate row")
+    _ = db.sql("INSERT INTO orders (id, amount) VALUES (99, 999.0)")
+except e:
+    if String(e).contains("ConflictError"):
+        print("duplicate row")
 ```
 
 ## CREATE TABLE
 
 ```mojo
-db.sql(
+_ = db.sql(
     "CREATE TABLE products (id INT64 PRIMARY KEY, name VARCHAR, price FLOAT64)")
 ```
 
 ## INSERT / UPDATE / DELETE
 
 ```mojo
-db.sql("INSERT INTO products (id, name, price) VALUES (1, 'Widget', 9.99)")
-db.sql("UPDATE products SET price = 14.99 WHERE id = 1")
-db.sql("DELETE FROM products WHERE id = 2")
+_ = db.sql("INSERT INTO products (id, name, price) VALUES (1, 'Widget', 9.99)")
+_ = db.sql("UPDATE products SET price = 14.99 WHERE id = 1")
+_ = db.sql("DELETE FROM products WHERE id = 2")
 ```
 
 For bulk inserts, the native batch transaction (`db.begin()`) is usually faster.
@@ -52,19 +54,19 @@ For bulk inserts, the native batch transaction (`db.begin()`) is usually faster.
 ## CREATE TABLE AS SELECT
 
 ```mojo
-db.sql("CREATE TABLE archive AS SELECT * FROM orders WHERE amount > 500")
+_ = db.sql("CREATE TABLE archive AS SELECT * FROM orders WHERE amount > 500")
 ```
 
 ## Recursive CTEs
 
 ```mojo
-db.sql("WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r WHERE n<10) SELECT n FROM r")
+_ = db.sql("WITH RECURSIVE r(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM r WHERE n<10) SELECT n FROM r")
 ```
 
 ## Window functions
 
 ```mojo
-db.sql(
+_ = db.sql(
     "SELECT id, customer, amount, ROW_NUMBER() OVER (PARTITION BY customer ORDER BY amount DESC) AS rn FROM orders")
 ```
 

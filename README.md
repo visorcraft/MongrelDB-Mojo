@@ -24,7 +24,7 @@
 
 ## Requirements
 
-- **Mojo 24.x** (the Modular toolchain)
+- **Mojo 0.25.7** (the Modular toolchain)
 - A running [`mongreldb-server`](https://github.com/visorcraft/MongrelDB) daemon
 
 ## What It Provides
@@ -68,74 +68,108 @@ Task-focused, commented guides live in [`docs/`](docs):
 - [Queries](docs/queries.md) - every native condition type and the index it pushes down to.
 - [SQL](docs/sql.md) - recursive CTEs, window functions, advanced SQL.
 - [Authentication](docs/auth.md) - Bearer token, HTTP Basic, and open modes.
-- [Errors](docs/errors.md) - the error hierarchy and recovery patterns.
+- [Errors](docs/errors.md) - the error categories and recovery patterns.
 
 ## Quick Example
 
 ```mojo
-from python import Python
+from python import Python, PythonObject
+from collections import Optional
 from mongreldb import MongrelDB
 
 fn main() raises:
-    let db = MongrelDB("http://127.0.0.1:8453")
+    var db = MongrelDB("http://127.0.0.1:8453")
 
     # Create a table. Column ids are stable on-wire identifiers.
-    let columns = Python.list()
+    var columns = Python.list()
     columns.append(col(1, "id", "int64", primary_key=True))
     columns.append(col(2, "customer", "varchar"))
     columns.append(col(3, "amount", "float64"))
-    let check = Python.dict()
-    check.__setitem__("id", 1)
-    check.__setitem__("name", "id_present")
-    let expr = Python.dict()
-    expr.__setitem__("IsNotNull", 1)
-    check.__setitem__("expr", expr)
-    let constraints = Python.dict()
-    let checks = Python.list()
+    var check = Python.dict()
+    check["id"] = 1
+    check["name"] = "id_present"
+    var expr = Python.dict()
+    expr["IsNotNull"] = 1
+    check["expr"] = expr
+    var constraints = Python.dict()
+    var checks = Python.list()
     checks.append(check)
-    constraints.__setitem__("checks", checks)
-    db.create_table("orders", columns, constraints)
+    constraints["checks"] = checks
+    _ = db.create_table("orders", columns, constraints)
 
-    db.put("orders", cells(1, 1, 2, "Alice", 3, 99.50))
-    db.put("orders", cells(1, 2, 2, "Bob",   3, 150.00))
+    _ = db.put("orders", cells3(1, 1, 2, "Alice", 3, 99.50))
+    _ = db.put("orders", cells3(1, 2, 2, "Bob",   3, 150.00))
 
-    let params = Python.dict()
-    params.__setitem__("column", 3)
-    params.__setitem__("min", 100.0)
-    params.__setitem__("max", 200.0)
-    params.__setitem__("min_inclusive", True)
-    params.__setitem__("max_inclusive", True)
-    let rows = db.query("orders").where("range_f64", params).limit(100).execute()
+    var params = Python.dict()
+    params["column"] = 3
+    params["min"] = 100.0
+    params["max"] = 200.0
+    params["min_inclusive"] = True
+    params["max_inclusive"] = True
+    var q = db.query("orders").where("range_f64", params).limit(100)
+    var rows = q.execute()
     print(db.count("orders"))   # 2
 
-    db.sql("UPDATE orders SET amount = 200.0 WHERE customer = 'Bob'")
+    _ = db.sql("UPDATE orders SET amount = 200.0 WHERE customer = 'Bob'")
+
+
+def col(
+    col_id: Int,
+    name: String,
+    ty: String,
+    *,
+    primary_key: Bool = False,
+    default_value: Optional[PythonObject] = None,
+) -> PythonObject:
+    c = Python.dict()
+    c["id"] = col_id
+    c["name"] = name
+    c["ty"] = ty
+    c["primary_key"] = primary_key
+    c["nullable"] = False
+    if default_value:
+        c["default_value"] = default_value.value()
+    return c
+
+
+def cells3(
+    k1: PythonObject, v1: PythonObject,
+    k2: PythonObject, v2: PythonObject,
+    k3: PythonObject, v3: PythonObject,
+) -> PythonObject:
+    d = Python.dict()
+    d[k1] = v1
+    d[k2] = v2
+    d[k3] = v3
+    return d
 ```
 
 ## Authentication
 
 ```mojo
 # Bearer token (--auth-token mode)
-let db1 = MongrelDB("http://127.0.0.1:8453", "my-secret-token")
+var db1 = MongrelDB("http://127.0.0.1:8453", "my-secret-token")
 
 # HTTP Basic (--auth-users mode)
-let db2 = MongrelDB("http://127.0.0.1:8453", "", "admin", "s3cret")
+var db2 = MongrelDB("http://127.0.0.1:8453", "", "admin", "s3cret")
 
 # Defaults: daemon address 127.0.0.1:8453, no auth.
-let db3 = MongrelDB()
+var db3 = MongrelDB()
 ```
 
 ## Batch transactions
 
 ```mojo
-let txn = db.begin()
-txn.put("orders", cells(1, 10, 2, "Dave", 3, 50.0))
-txn.put("orders", cells(1, 11, 2, "Eve",  3, 75.0))
-txn.delete_by_pk("orders", 2)
+var txn = db.begin()
+_ = txn.put("orders", cells3(1, 10, 2, "Dave", 3, 50.0))
+_ = txn.put("orders", cells3(1, 11, 2, "Eve",  3, 75.0))
+_ = txn.delete_by_pk("orders", 2)
 
 try:
-    let results = txn.commit()   # atomic - all or nothing
-except ConflictError:
-    print("constraint violated")
+    var results = txn.commit()   # atomic - all or nothing
+except e:
+    if String(e).contains("ConflictError"):
+        print("constraint violated")
 ```
 
 ## SQL
@@ -168,15 +202,15 @@ epochs (monotonically increasing commit numbers).
 
 ```mojo
 # Keep at least 1000 epochs of history readable.
-let result = db.set_history_retention_epochs(1000)
-print(result.__getitem__("history_retention_epochs"))  # 1000
-print(result.__getitem__("earliest_retained_epoch"))   # oldest epoch still available
+var result = db.set_history_retention_epochs(1000)
+print(result["history_retention_epochs"])  # 1000
+print(result["earliest_retained_epoch"])   # oldest epoch still available
 
 print(db.history_retention_epochs())       # 1000
 print(db.earliest_retained_epoch())        # oldest readable epoch
 
 # Read a table as it existed at a specific epoch.
-let rows = db.sql("SELECT label FROM orders AS OF EPOCH 42 WHERE id = 1")
+var rows = db.sql("SELECT label FROM orders AS OF EPOCH 42 WHERE id = 1")
 ```
 
 Raising retention prevents history from being garbage collected, but it cannot

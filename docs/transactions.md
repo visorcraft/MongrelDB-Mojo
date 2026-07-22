@@ -15,7 +15,11 @@ The engine enforces `UNIQUE`, foreign-key, check, and trigger constraints at
 ### Single op: `db.put`
 
 ```mojo
-let res = db.put("orders", cells(1, 1, 2, "Alice", 3, 99.5))
+var cells = Python.dict()
+cells[1] = 1
+cells[2] = "Alice"
+cells[3] = 99.5
+var res = db.put("orders", cells)
 ```
 
 `upsert`, `delete`, and `delete_by_pk` are the same shape.
@@ -23,14 +27,18 @@ let res = db.put("orders", cells(1, 1, 2, "Alice", 3, 99.5))
 ### Batch: `db.begin()` + `Transaction`
 
 ```mojo
-let txn = db.begin()
-txn.put("orders", cells(1, 10, 2, "Dave", 3, 50.0))
-txn.put("orders", cells(1, 11, 2, "Eve",  3, 75.0))
-txn.delete_by_pk("orders", 2)
+var txn = db.begin()
+_ = txn.put("orders", cells3(1, 10, 2, "Dave", 3, 50.0))
+_ = txn.put("orders", cells3(1, 11, 2, "Eve",  3, 75.0))
+_ = txn.delete_by_pk("orders", 2)
 
-let results = txn.commit()
+var results = txn.commit()
 print("committed " + String(len(results)) + " ops")
 ```
+
+`cells1`/`cells2`/`cells3` in these snippets are small helpers that build the
+column-id-to-value dict shown above, in the style of the `cells3` helper
+defined in [quickstart.md](quickstart.md).
 
 ## Idempotency keys for safe retries
 
@@ -39,9 +47,9 @@ An idempotency key makes a commit safe to retry: the daemon replays the
 **original** result on a duplicate commit, even across restarts.
 
 ```mojo
-fn charge(db: MongrelDB, order_id: Int) -> List[PythonObject]:
-    let txn = db.begin()
-    txn.put("charges", cells(1, order_id, 2, 199.0))
+fn charge(db: MongrelDB, order_id: Int) raises -> List[PythonObject]:
+    var txn = db.begin()
+    _ = txn.put("charges", cells2(1, order_id, 2, 199.0))
     # Use a stable, business-meaningful key derived from the request.
     return txn.commit("charge:" + String(order_id))
 ```
@@ -54,16 +62,18 @@ Rules for keys:
 
 ## Handling constraint violations
 
-Constraint violations arrive as HTTP 409, mapped to `ConflictError`. It carries
-the structured `code` and the offending `op_index`:
+Constraint violations arrive as HTTP 409, mapped to `ConflictError`. The
+category, structured `code`, and offending `op_index` are embedded in the
+error message:
 
 ```mojo
+var txn = db.begin()
+_ = txn.put("orders", cells1(1, 1))
 try:
-    let txn = db.begin()
-    txn.put("orders", cells(1, 1))
-    txn.commit()
-except ConflictError:
-    print("constraint violated")
+    _ = txn.commit()
+except e:
+    if String(e).contains("ConflictError"):
+        print("constraint violated: " + String(e))
 ```
 
 The error envelope from the daemon:
@@ -80,15 +90,15 @@ The error envelope from the daemon:
    release the `Transaction` when you decide not to commit (before ever sending).
 
 ```mojo
-let txn = db.begin()
-txn.put("orders", cells(1, 1, 2, "Iris", 3, 5.0))
+var txn = db.begin()
+_ = txn.put("orders", cells3(1, 1, 2, "Iris", 3, 5.0))
 
 if not business_rule_ok:
     txn.rollback()  # throw the staged ops away locally; nothing sent
 else:
     try:
-        txn.commit()
-    except ConflictError:
+        _ = txn.commit()
+    except:
         pass  # server already rolled back
 ```
 
@@ -102,8 +112,8 @@ committed.
 | One independent write | `put` / `upsert` / `delete` / `delete_by_pk` |
 | Several writes that must commit together | `begin()` + `commit(idempotency_key)` |
 | Retry safely after a network blip | `commit(idempotency_key)` with a stable key |
-| Distinguish constraint classes | catch `ConflictError`, read `.code()` and `.op_index()` |
+| Distinguish constraint classes | match the `ConflictError` prefix; read `code`/`op_index` in the message |
 | Abort before sending | `rollback()` |
 
-See [errors.md](errors.md) for the full error hierarchy and [queries.md](queries.md)
+See [errors.md](errors.md) for the full error reference and [queries.md](queries.md)
 for read patterns.

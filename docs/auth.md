@@ -15,27 +15,36 @@ The Mojo client supports all three through the `MongrelDB` constructor.
 ## Bearer token mode
 
 ```mojo
-let db = MongrelDB("http://127.0.0.1:8453", "s3cret-token")
+var db = MongrelDB("http://127.0.0.1:8453", "s3cret-token")
+var ok = db.health()
+if not ok:
+    print("bad or missing token, or daemon down")
+```
+
+For requests beyond `health` (which swallows errors by design), an
+`AuthError`-category error is raised; match the category prefix in the message:
+
+```mojo
 try:
-    let ok = db.health()
-    print("healthy: " + String(ok))
-except AuthError:
-    print("bad or missing token")
+    _ = db.schema()
+except e:
+    if String(e).contains("AuthError"):
+        print("bad or missing token")
 ```
 
 A missing or wrong token surfaces as `AuthError` (HTTP 401/403). Read the token
 from the environment rather than hard-coding it:
 
 ```mojo
-let os_module = Python.import_module("os")
-let token = String(os_module.environ.get("MONGRELDB_TOKEN", ""))
-let db = MongrelDB(token)
+var os_module = Python.import_module("os")
+var token = String(os_module.environ.get("MONGRELDB_TOKEN", ""))
+var db = MongrelDB("http://127.0.0.1:8453", token)
 ```
 
 ## Basic auth mode
 
 ```mojo
-let db = MongrelDB("http://127.0.0.1:8453", "", "admin", "s3cret")
+var db = MongrelDB("http://127.0.0.1:8453", "", "admin", "s3cret")
 ```
 
 The client base64-encodes `username:password` and sets `Authorization: Basic ...`
@@ -46,7 +55,7 @@ on every request.
 If you supply both, `token` wins and Basic credentials are ignored:
 
 ```mojo
-let db = MongrelDB(url, "overrides-everything", "fallback", "user")
+var db = MongrelDB(url, "overrides-everything", "fallback", "user")
 ```
 
 ## CRLF validation
@@ -61,24 +70,25 @@ When the daemon is in Basic auth mode, users and roles live in the catalog and
 are managed with SQL. Run these through `db.sql`.
 
 ```mojo
-db.sql("CREATE USER alice WITH PASSWORD 'hunter2'")
-db.sql("ALTER USER alice ADMIN")
-db.sql("CREATE ROLE analyst")
-db.sql("GRANT SELECT ON orders TO analyst")
-db.sql("GRANT analyst TO alice")
-db.sql("DROP USER alice")
+_ = db.sql("CREATE USER alice WITH PASSWORD 'hunter2'")
+_ = db.sql("ALTER USER alice ADMIN")
+_ = db.sql("CREATE ROLE analyst")
+_ = db.sql("GRANT SELECT ON orders TO analyst")
+_ = db.sql("GRANT analyst TO alice")
+_ = db.sql("DROP USER alice")
 ```
 
 ## Common pitfalls
 
-**Auth errors look like other errors without a specific catch.** A 401/403
-raises `AuthError`; a 404 raises `NotFoundError`. Always discriminate by type
-rather than string-matching the message.
+**Auth errors look like other errors without a category check.** A 401/403
+raises an `AuthError`-category error; a 404 raises `NotFoundError`. Mojo raises
+only the built-in `Error` type, so discriminate by the category prefix in the
+message (see [errors.md](errors.md)).
 
 **Token in version control.** Put secrets in the environment, a secret manager,
 or a file outside the repo. Never commit a real token.
 
 ## Next steps
 
-- [errors.md](errors.md) - `AuthError` and the rest of the error hierarchy
+- [errors.md](errors.md) - `AuthError` and the rest of the error categories
 - [quickstart.md](quickstart.md) - the full end-to-end walkthrough

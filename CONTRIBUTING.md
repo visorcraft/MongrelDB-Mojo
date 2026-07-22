@@ -49,15 +49,15 @@ Live tests self-skip when no server is reachable.
 
 ### Mojo
 
-- **Version.** Mojo 24.x. Don't drop the minimum casually.
+- **Version.** Mojo 0.25.7. Don't drop the minimum casually.
 - **Dependencies.** No external packages - only the Python standard library
   (via interop) and the Mojo standard library. New dependencies must be MIT or
   Apache-2.0 licensed and justified.
-- **Errors.** Raise a typed error hierarchy (`MongrelDBError` base, `AuthError`,
-  `NotFoundError`, `ConflictError`, `QueryError`) carrying the HTTP status and
-  decoded server envelope.
+- **Errors.** Raise typed error categories (`MongrelDBError` base, `AuthError`,
+  `NotFoundError`, `ConflictError`, `QueryError`) - `Error` values whose message
+  carries the category prefix, HTTP status, and decoded server envelope.
 - **Naming.** Idiomatic Mojo: `snake_case` functions and variables, `PascalCase`
-  structs/classes.
+  structs.
 
 ### Commit messages
 

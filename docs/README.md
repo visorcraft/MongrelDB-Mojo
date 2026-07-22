@@ -10,7 +10,7 @@ surface in one place, see the root [README](../README.md).
 | [queries.md](queries.md) | Every native index condition: PK, range, bitmap, full-text, vector similarity |
 | [sql.md](sql.md) | CREATE TABLE, INSERT/UPDATE/DELETE/SELECT, CREATE TABLE AS SELECT, recursive CTEs, window functions |
 | [auth.md](auth.md) | Bearer token and Basic auth modes, user/role management via SQL |
-| [errors.md](errors.md) | Error hierarchy, HTTP-status mapping, recovery patterns |
+| [errors.md](errors.md) | Error categories, HTTP-status mapping, recovery patterns |
 
 ## Where to start
 

@@ -6,15 +6,12 @@ vector similarity, and more. Each condition type maps to one specialized index;
 conditions are AND-ed together.
 
 ```mojo
-let params = Python.dict()
-params.__setitem__("column", 3)
-params.__setitem__("min", 100.0)
-params.__setitem__("max", 500.0)
-let rows = db.query("orders")
-    .where("range_f64", params)
-    .projection(Python.list())
-    .limit(100)
-    .execute()
+var params = Python.dict()
+params["column"] = 3
+params["min"] = 100.0
+params["max"] = 500.0
+var q = db.query("orders").where("range_f64", params).projection(Python.list()).limit(100)
+var rows = q.execute()
 ```
 
 ---
@@ -23,7 +20,7 @@ let rows = db.query("orders")
 
 | Method | Purpose |
 |--------|---------|
-| `where(cond_type, params)` | Add a native condition. Multiple calls are AND-ed. |
+| `where(cond_type, params)` | Return a new builder with a native condition added. Multiple conditions are AND-ed. |
 | `projection(column_ids)` | Return only these column ids (`None` means all columns). |
 | `limit(n)` | Cap the number of rows. |
 | `build()` | Produce the request payload (useful for debugging). |
@@ -38,33 +35,44 @@ numeric **column id**, never the column name.
 ### `pk` - exact primary-key match
 
 ```mojo
-let p = Python.dict(); p.__setitem__("value", 42)
-db.query("orders").where("pk", p).execute()
+var p = Python.dict()
+p["value"] = 42
+var q = db.query("orders").where("pk", p)
+_ = q.execute()
 ```
 
 ### `range` - integer range (learned-range index)
 
 ```mojo
-let p = Python.dict()
-p.__setitem__("column", 3); p.__setitem__("min", 100); p.__setitem__("max", 500)
-db.query("orders").where("range", p).execute()
+var p = Python.dict()
+p["column"] = 3
+p["min"] = 100
+p["max"] = 500
+var q = db.query("orders").where("range", p)
+_ = q.execute()
 ```
 
 ### `range_f64` - float range with inclusive/exclusive control
 
 ```mojo
-let p = Python.dict()
-p.__setitem__("column", 3); p.__setitem__("min", 100.0); p.__setitem__("max", 500.0)
-p.__setitem__("min_inclusive", True); p.__setitem__("max_inclusive", False)
-db.query("orders").where("range_f64", p).execute()
+var p = Python.dict()
+p["column"] = 3
+p["min"] = 100.0
+p["max"] = 500.0
+p["min_inclusive"] = True
+p["max_inclusive"] = False
+var q = db.query("orders").where("range_f64", p)
+_ = q.execute()
 ```
 
 ### `bitmap_eq` - equality on a bitmap-indexed column
 
 ```mojo
-let p = Python.dict()
-p.__setitem__("column", 2); p.__setitem__("value", "Alice")
-db.query("orders").where("bitmap_eq", p).execute()
+var p = Python.dict()
+p["column"] = 2
+p["value"] = "Alice"
+var q = db.query("orders").where("bitmap_eq", p)
+_ = q.execute()
 ```
 
 ### `fm_contains` - full-text substring search (FM-index)
@@ -72,19 +80,27 @@ db.query("orders").where("bitmap_eq", p).execute()
 Use `pattern` (the server key) or the friendly `value` alias:
 
 ```mojo
-let p = Python.dict()
-p.__setitem__("column", 2); p.__setitem__("value", "database")
-db.query("documents").where("fm_contains", p).limit(10).execute()
+var p = Python.dict()
+p["column"] = 2
+p["value"] = "database"
+var q = db.query("documents").where("fm_contains", p).limit(10)
+_ = q.execute()
 ```
 
 ### `ann` - dense vector similarity (HNSW)
 
 ```mojo
-let p = Python.dict()
-p.__setitem__("column", 2)
-p.__setitem__("query", Python.list([0.1, 0.2, 0.3, 0.4]))
-p.__setitem__("k", 10)
-db.query("embeddings").where("ann", p).execute()
+var p = Python.dict()
+p["column"] = 2
+var query_vec = Python.list()
+query_vec.append(0.1)
+query_vec.append(0.2)
+query_vec.append(0.3)
+query_vec.append(0.4)
+p["query"] = query_vec
+p["k"] = 10
+var q = db.query("embeddings").where("ann", p)
+_ = q.execute()
 ```
 
 ## Friendly alias translation
@@ -101,8 +117,8 @@ db.query("embeddings").where("ann", p).execute()
 ## Limit and the truncated flag
 
 ```mojo
-let q = db.query("orders").where("range", params).limit(100)
-let rows = q.execute()
+var q = db.query("orders").where("range", params).limit(100)
+var rows = q.execute()
 if q.truncated():
     print("result capped at " + String(len(rows)))
 ```
@@ -110,11 +126,15 @@ if q.truncated():
 ## Putting it together
 
 ```mojo
-fn top_spenders(db: MongrelDB, customer: String) -> PythonObject:
-    let p1 = Python.dict(); p1.__setitem__("column", 2); p1.__setitem__("value", customer)
-    let p2 = Python.dict(); p2.__setitem__("column", 3); p2.__setitem__("min", 100)
-    let q = db.query("orders").where("bitmap_eq", p1).where("range", p2).limit(50)
-    let rows = q.execute()
+fn top_spenders(db: MongrelDB, customer: String) raises -> PythonObject:
+    var p1 = Python.dict()
+    p1["column"] = 2
+    p1["value"] = customer
+    var p2 = Python.dict()
+    p2["column"] = 3
+    p2["min"] = 100
+    var q = db.query("orders").where("bitmap_eq", p1).where("range", p2).limit(50)
+    var rows = q.execute()
     if q.truncated():
         print("warning: top_spenders result capped at 50")
     return rows

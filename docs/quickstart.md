@@ -57,36 +57,59 @@ Or run from this checkout directly with `-I src` on the import path.
 Create `demo.mojo`:
 
 ```mojo
-from python import Python
+from python import Python, PythonObject
 from mongreldb import MongrelDB
 
 fn main() raises:
-    let db = MongrelDB("http://127.0.0.1:8453")
+    var db = MongrelDB("http://127.0.0.1:8453")
 
     if not db.health():
         print("daemon not reachable")
         return
 
-    let columns = Python.list()
+    var columns = Python.list()
     columns.append(col(1, "id", "int64", primary_key=True))
     columns.append(col(2, "customer", "varchar"))
     columns.append(col(3, "amount", "float64"))
-    let tid = db.create_table("orders", columns)
+    var tid = db.create_table("orders", columns)
     print("created table id: " + String(tid))
 
-    db.put("orders", cells(1, 1, 2, "Alice", 3, 99.5))
-    db.put("orders", cells(1, 2, 2, "Bob",   3, 150.0))
+    _ = db.put("orders", cells3(1, 1, 2, "Alice", 3, 99.5))
+    _ = db.put("orders", cells3(1, 2, 2, "Bob",   3, 150.0))
 
-    let params = Python.dict()
-    params.__setitem__("column", 3)
-    params.__setitem__("min", 100.0)
-    params.__setitem__("max", 200.0)
-    params.__setitem__("min_inclusive", True)
-    params.__setitem__("max_inclusive", True)
-    let rows = db.query("orders").where("range_f64", params).limit(100).execute().to_list()
+    var params = Python.dict()
+    params["column"] = 3
+    params["min"] = 100.0
+    params["max"] = 200.0
+    params["min_inclusive"] = True
+    params["max_inclusive"] = True
+    var q = db.query("orders").where("range_f64", params).limit(100)
+    var rows = q.execute()
     print("rows: " + String(len(rows)))
 
     print("total rows: " + String(db.count("orders")))
+
+
+def col(col_id: Int, name: String, ty: String, *, primary_key: Bool = False) -> PythonObject:
+    c = Python.dict()
+    c["id"] = col_id
+    c["name"] = name
+    c["ty"] = ty
+    c["primary_key"] = primary_key
+    c["nullable"] = False
+    return c
+
+
+def cells3(
+    k1: PythonObject, v1: PythonObject,
+    k2: PythonObject, v2: PythonObject,
+    k3: PythonObject, v3: PythonObject,
+) -> PythonObject:
+    d = Python.dict()
+    d[k1] = v1
+    d[k2] = v2
+    d[k3] = v3
+    return d
 ```
 
 Run it:
@@ -116,43 +139,56 @@ omits the cell) or a `default_expr` (a dynamic engine-computed default such as
 The six recognized shapes - each preserving its JSON type on the wire - are:
 
 ```mojo
-from python import Python
+from python import Python, PythonObject
+from collections import List
 
 # 1. String default.
-c1 = Python.dict()
-c1.__setitem__("id", 10); c1.__setitem__("name", "status")
-c1.__setitem__("ty", "varchar"); c1.__setitem__("default_value", "draft")
+var c1 = Python.dict()
+c1["id"] = 10
+c1["name"] = "status"
+c1["ty"] = "varchar"
+c1["default_value"] = "draft"
 
 # 2. Integer default.
-c2 = Python.dict()
-c2.__setitem__("id", 11); c2.__setitem__("name", "retries")
-c2.__setitem__("ty", "int64"); c2.__setitem__("default_value", 3)
+var c2 = Python.dict()
+c2["id"] = 11
+c2["name"] = "retries"
+c2["ty"] = "int64"
+c2["default_value"] = 3
 
 # 3. Boolean default.
-c3 = Python.dict()
-c3.__setitem__("id", 12); c3.__setitem__("name", "enabled")
-c3.__setitem__("ty", "bool"); c3.__setitem__("default_value", True)
+var c3 = Python.dict()
+c3["id"] = 12
+c3["name"] = "enabled"
+c3["ty"] = "bool"
+c3["default_value"] = True
 
 # 4. Explicit null default (distinct from omitting the key).
-c4 = Python.dict()
-c4.__setitem__("id", 13); c4.__setitem__("name", "note")
-c4.__setitem__("ty", "varchar"); c4.__setitem__("default_value", None)
+var c4 = Python.dict()
+c4["id"] = 13
+c4["name"] = "note"
+c4["ty"] = "varchar"
+c4["default_value"] = PythonObject()
 
 # 5. Literal string "now" - stored as a plain string default, not a dynamic
 #    expression, because it is passed via default_value rather than default_expr.
-c5 = Python.dict()
-c5.__setitem__("id", 14); c5.__setitem__("name", "tag")
-c5.__setitem__("ty", "varchar"); c5.__setitem__("default_value", "now")
+var c5 = Python.dict()
+c5["id"] = 14
+c5["name"] = "tag"
+c5["ty"] = "varchar"
+c5["default_value"] = "now"
 
 # 6. Dynamic default_expr - the engine evaluates "now" on each insert.
-c6 = Python.dict()
-c6.__setitem__("id", 15); c6.__setitem__("name", "created_at")
-c6.__setitem__("ty", "timestamp_nanos"); c6.__setitem__("default_expr", "now")
+var c6 = Python.dict()
+c6["id"] = 15
+c6["name"] = "created_at"
+c6["ty"] = "timestamp_nanos"
+c6["default_expr"] = "now"
 
-columns = Python.list()
-for c in [c1, c2, c3, c4, c5, c6]:
+var columns = Python.list()
+for c in List[PythonObject](c1, c2, c3, c4, c5, c6):
     columns.append(c)
-db.create_table("defaults_demo", columns)
+_ = db.create_table("defaults_demo", columns)
 ```
 
 Omit both keys for a column with no default (the server requires a cell on every
@@ -180,4 +216,4 @@ query builder for typed row retrieval; use `sql` for DDL/DML.
 - [queries.md](queries.md) - every native index condition
 - [sql.md](sql.md) - recursive CTEs, window functions
 - [auth.md](auth.md) - bearer tokens, basic auth
-- [errors.md](errors.md) - the full error hierarchy
+- [errors.md](errors.md) - the full error reference

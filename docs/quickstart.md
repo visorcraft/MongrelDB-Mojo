@@ -24,7 +24,7 @@ mojo --version
 ```sh
 mkdir -p bin
 curl -fsSL -o bin/mongreldb-server \
-  https://github.com/visorcraft/MongrelDB/releases/download/v0.64.11/mongreldb-server-linux-x64
+  https://github.com/visorcraft/MongrelDB/releases/download/v0.64.12/mongreldb-server-linux-x64
 chmod +x bin/mongreldb-server
 ```
 

@@ -44,13 +44,18 @@ curl http://127.0.0.1:8453/health
 # ok
 ```
 
-## 3. Create a project and pull in the client
+## 3. Clone the repo and pull in the client
+
+The client is not published to a registry yet, so clone this repo and use it
+from source:
 
 ```sh
-magic add mongreldb-mojo
+git clone https://github.com/visorcraft/MongrelDB-Mojo.git
+cd MongrelDB-Mojo
 ```
 
-Or run from this checkout directly with `-I src` on the import path.
+Write your program in the checkout and run it with `-I src` on the import
+path.
 
 ## 4. Write your first program
 

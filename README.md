@@ -20,7 +20,7 @@
 
 | Surface | Package | Install |
 |---|---|---|
-| Mojo client | `mongreldb` | `magic add mongreldb-mojo` (from source) |
+| Mojo client | `mongreldb` | not published to a registry - use from source (below) |
 
 ## Requirements
 
@@ -49,15 +49,17 @@ mapping, cell flattening, alias translation) is written in Mojo.
 
 ## Install
 
-```sh
-magic add mongreldb-mojo
-```
-
-Or run the sources directly from this checkout:
+The package is not published to a registry yet, so clone this repo and use it
+from source:
 
 ```sh
+git clone https://github.com/visorcraft/MongrelDB-Mojo.git
+cd MongrelDB-Mojo
 mojo run -I src examples/basic_crud.mojo
 ```
+
+The client package lives under `src/mongreldb/`; run your own programs against
+the checkout the same way, with `mojo run -I src`.
 
 ## Examples
 
